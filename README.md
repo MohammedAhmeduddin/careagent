@@ -468,6 +468,13 @@ Provider data structure modelled on [CMS Medicare Provider Utilization and Payme
 
 ---
 
+## Author
+
+**Ahmeduddin Mohammed**
+
+- GitHub: [MohammedAhmeduddin](https://github.com/MohammedAhmeduddin)
+- LinkedIn: [linkedin.com/in/mohammed-ahmeduddin/](https://www.linkedin.com/in/mohammed-ahmeduddin/)
+
 <div align="center">
 <sub>Built with LangGraph · FastAPI · PostgreSQL · scikit-learn · GPT-4o-mini</sub>
 </div>
