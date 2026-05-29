@@ -1,0 +1,97 @@
+name: CareAgent CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Unit Tests + Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run unit tests with coverage
+        env:
+          POSTGRES_USER: careagent
+          POSTGRES_PASSWORD: careagent_dev
+          POSTGRES_DB: careagent_db
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          OPENAI_API_KEY: sk-placeholder
+          LANGCHAIN_TRACING_V2: "false"
+          LANGCHAIN_API_KEY: placeholder
+          MLFLOW_TRACKING_URI: http://localhost:5001
+          APP_ENV: development
+        run: |
+          PYTHONPATH=src pytest tests/unit/ \
+            --cov=careagent.db.models \
+            --cov=careagent.db.queries \
+            --cov=careagent.agents.supervisor \
+            --cov=careagent.api.schemas \
+            --cov-report=term-missing \
+            --cov-fail-under=85 \
+            -v
+
+      - name: Validate all imports
+        run: |
+          PYTHONPATH=src python -c "
+          from careagent.config import get_settings
+          from careagent.db.models import Provider, ProviderService, AgentRun
+          from careagent.db.queries import get_provider_by_npi
+          from careagent.graph.state import AgentState, initial_state
+          from careagent.agents.supervisor import supervisor, route_after_supervisor
+          from careagent.api.schemas import AnalyzeRequest, ScorecardResponse
+          print('All imports OK')
+          "
+
+      - name: Validate API schema contracts
+        run: |
+          PYTHONPATH=src python -c "
+          from careagent.api.schemas import AnalyzeRequest
+          from pydantic import ValidationError
+          # Valid NPI passes
+          req = AnalyzeRequest(npi='1234567890')
+          assert req.npi == '1234567890'
+          # Invalid NPI rejected
+          try:
+              AnalyzeRequest(npi='short')
+              raise AssertionError('Should have rejected short NPI')
+          except ValidationError:
+              pass
+          print('Schema validation OK')
+          "
+
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff linter
+        run: ruff check src/ tests/ --ignore E501,F401
+        continue-on-error: true
