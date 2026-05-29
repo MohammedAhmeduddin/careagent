@@ -5,7 +5,7 @@ Additional tests to cover missing lines in agents and db/session.
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 from dataclasses import dataclass
 from typing import Optional
 from sqlalchemy import create_engine
@@ -204,11 +204,11 @@ class TestDbSession:
         assert isinstance(result, bool)
 
     def test_create_tables_runs_without_error(self):
-        # Uses real engine — just verify no exception raised
-        try:
+        # Mock the engine — create_tables should call metadata.create_all
+        with patch("careagent.db.session.Base") as mock_base:
+            mock_base.metadata.create_all = MagicMock()
             create_tables()
-        except Exception as e:
-            pytest.fail(f"create_tables raised: {e}")
+            mock_base.metadata.create_all.assert_called_once()
 
     def test_check_connection_false_on_bad_url(self):
         with patch("careagent.db.session.engine") as mock_engine:
