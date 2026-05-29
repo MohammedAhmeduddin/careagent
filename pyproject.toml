@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "careagent"
+version = "0.1.0"
+description = "Multi-Agent System for Automated Provider Quality Scoring"
+readme = "README.md"
+requires-python = ">=3.11"
+
+dependencies = [
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+    "loguru>=0.7.2",
+    "sqlalchemy>=2.0.28",
+    "psycopg2-binary>=2.9.9",
+    "alembic>=1.13.1",
+    "pandas>=2.2.1",
+    "numpy>=1.26.4",
+    "scikit-learn>=1.4.1",
+    "langchain>=0.1.12",
+    "langgraph>=0.0.38",
+    "langchain-openai>=0.1.0",
+    "langsmith>=0.1.27",
+    "openai>=1.14.0",
+    "ragas>=0.1.7",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "mlflow>=2.11.1",
+    "streamlit>=1.32.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.1.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.5",
+    "httpx>=0.27.0",
+    "ruff>=0.3.2",
+    "mypy>=1.9.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=careagent.db.models --cov=careagent.db.queries --cov-report=term-missing --cov-fail-under=85"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
