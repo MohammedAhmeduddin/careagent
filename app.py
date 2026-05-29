@@ -12,7 +12,7 @@ import time
 import requests
 import streamlit as st
 
-API_BASE = "http://localhost:8000"
+API_BASE = "https://careagent-api-668260909878.us-central1.run.app"
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(

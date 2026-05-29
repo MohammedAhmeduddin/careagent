@@ -2,27 +2,22 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
 RUN apt-get update && apt-get install -y \
     libpq-dev gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
 COPY pyproject.toml .
-RUN pip install --no-cache-dir -e "."
-
-# Copy source
+COPY README.md .
 COPY src/ src/
 
-# Expose port
-EXPOSE 8000
+RUN pip install --no-cache-dir -e "."
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+EXPOSE 8080
 
-# Run
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"
+
 CMD ["uvicorn", "careagent.api.main:app", \
      "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "2"]
+     "--port", "8080", \
+     "--workers", "1"]
