@@ -90,7 +90,7 @@ jobs:
           cache: "pip"
 
       - name: Install ruff
-        run: pip install ruff
+        run: pip install "ruff==0.17.5"
 
       - name: Run ruff linter
         run: ruff check src/ tests/ --ignore E501,F401
