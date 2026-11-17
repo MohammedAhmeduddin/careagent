@@ -11,3 +11,9 @@ dist/
 data/
 mlruns/
 venv/
+
+# Secrets and local-only folders
+.env.*
+!.env.example
+.DS_Store
+hf-careagent/

@@ -183,7 +183,7 @@ def summarizer_agent(state: AgentState) -> AgentState:
                 logger.warning(f"[Summarizer] GPT failed ({e}) — using template")
                 used_fallback = True
         else:
-            logger.info(f"[Summarizer] No API key — using template narrative")
+            logger.info("[Summarizer] No API key — using template narrative")
             used_fallback = True
 
         # ── Fallback ───────────────────────────────────────────────────────────

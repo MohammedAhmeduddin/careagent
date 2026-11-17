@@ -15,7 +15,7 @@
 
 ### Multi-Agent Provider Quality Intelligence System
 
-*Automates Medicare provider quality scoring, anomaly detection, and network recommendations using a LangGraph multi-agent pipeline on real CMS data — in under 0.4 seconds per provider.*
+*Automates Medicare provider quality scoring, anomaly detection, and network recommendations using a LangGraph multi-agent pipeline on synthetic data in the CMS Medicare schema — in under 0.4 seconds per provider.*
 
 <br/>
 
@@ -64,7 +64,7 @@ A single API call ingests a provider NPI, routes it through five specialized age
 | Metric | Value |
 |---|---|
 | Pipeline latency | **0.32 – 0.36s** per provider (warm instance) |
-| Providers loaded | **10,000** CMS Medicare records |
+| Providers loaded | **10,000** synthetic providers (CMS Medicare schema) |
 | Procedure rows | **54,987** across 15 HCPCS codes |
 | Specialties covered | **20** |
 | Anomaly detection rate | **3.0%** — 300 / 9,985 providers flagged |
