@@ -14,6 +14,9 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        # Ignore variables this version doesn't use (e.g. MLFLOW_TRACKING_URI in an
+        # older .env or Cloud Run config) instead of refusing to start.
+        extra="ignore",
     )
 
     # App
@@ -26,13 +29,24 @@ class Settings(BaseSettings):
     postgres_db: str = Field(default="careagent_db")
     postgres_host: str = Field(default="localhost")
     postgres_port: int = Field(default=5432)
+    # "require" for Neon; CI's local Postgres has no TLS, so it sets "disable".
+    postgres_sslmode: str = Field(default="require")
+    # A full connection string (e.g. from Secret Manager) overrides POSTGRES_*.
+    database_url_env: str = Field(default="", validation_alias="DATABASE_URL")
 
     @computed_field
     @property
     def database_url(self) -> str:
+        if self.database_url_env:
+            url = self.database_url_env.strip()
+            for prefix in ("postgres://", "postgresql://"):
+                if url.startswith(prefix):
+                    return "postgresql+psycopg2://" + url[len(prefix):]
+            return url
         return (
             f"postgresql+psycopg2://{self.postgres_user}:{self.postgres_password}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}?sslmode=require"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+            f"?sslmode={self.postgres_sslmode}"
         )
 
     # OpenAI
@@ -50,16 +64,11 @@ class Settings(BaseSettings):
     langchain_api_key: str = Field(default="")
     langchain_project: str = Field(default="careagent")
 
-    # MLflow
-    mlflow_tracking_uri: str = Field(default="http://localhost:5001")
-
     # Data
-    cms_data_path: str = Field(default="data/cms_provider_2022.csv")
+    cms_data_path: str = Field(default="data/raw/cms_providers_NJ_2024.csv")
 
-    # Agent thresholds
-    data_quality_threshold: float = Field(default=0.15)
-    anomaly_contamination: float = Field(default=0.03)
-    quality_score_review_threshold: float = Field(default=65.0)
+    # Data validation: below this completeness the provider is not compared
+    min_data_completeness: float = Field(default=1.0)
 
 
 @lru_cache(maxsize=1)

@@ -1,77 +1,62 @@
 """
 careagent.graph.state
 ~~~~~~~~~~~~~~~~~~~~~
-Shared AgentState TypedDict — the single source of truth
-that all agents read from and write to.
-
-Design principle: every field that any agent produces is defined
-here BEFORE any agent is written. This prevents schema drift
-between agents and makes the supervisor routing logic type-safe.
+Shared AgentState TypedDict: the single contract every agent reads from
+and writes to. Every field an agent produces is declared here first, so
+agents cannot drift apart and the supervisor's routing stays type-safe.
 """
 
 from typing import Optional, TypedDict
 
 
 class AgentState(TypedDict):
-    """
-    Shared state object passed between all agents in the pipeline.
-    The supervisor reads this after each agent step to decide
-    what runs next.
-
-    Fields are grouped by which agent populates them.
-    All fields are Optional — agents only fill their own section.
-    """
-
     # ── Input ──────────────────────────────────────────────────────────────────
-    npi: str                          # Provider NPI — the pipeline input
-    run_id: str                       # UUID for this pipeline execution
+    npi: str
+    run_id: str
 
     # ── Supervisor control ─────────────────────────────────────────────────────
-    next_agent: Optional[str]         # Which agent runs next (set by supervisor)
-    agents_executed: list[str]        # Agents that have run
-    agents_skipped: list[str]         # Agents skipped by supervisor
-    error: Optional[str]              # Set if any agent fails
+    next_agent: Optional[str]
+    agents_executed: list[str]
+    agents_skipped: list[str]
+    error: Optional[str]
 
-    # ── Data Cleaner Agent output ──────────────────────────────────────────────
-    data_quality_score: Optional[float]   # 0.0-1.0. < 0.85 triggers cleaning
-    fields_imputed: Optional[int]         # How many fields were imputed
-    cleaning_notes: Optional[str]         # What was fixed or flagged
-    cleaning_complete: Optional[bool]     # True when cleaner is done
+    # ── Data Validator (node "data_cleaner") ───────────────────────────────────
+    provider_type: Optional[str]
+    city: Optional[str]
+    state: Optional[str]
+    data_completeness: Optional[float]   # share of required fields present, 0-1
+    missing_fields: Optional[list[str]]
+    cleaning_notes: Optional[str]
+    cleaning_complete: Optional[bool]
 
-    # ── Statistical Agent output ───────────────────────────────────────────────
-    quality_score: Optional[float]        # Composite score 0-100
-    quality_percentile: Optional[float]   # National percentile 0-100
-    cost_efficiency_ratio: Optional[float] # submitted_charge / medicare_payment
-    volume_percentile: Optional[float]    # Volume vs specialty peers
-    specialty_benchmarks: Optional[dict]  # National avg metrics for specialty
+    # ── Statistical Agent: peer comparison ─────────────────────────────────────
+    billing_pattern_status: Optional[str]   # typical | outlier | insufficient_peers | insufficient_data
+    peer_group_size: Optional[int]
+    provider_metrics: Optional[dict]        # the provider's own values
+    peer_benchmarks: Optional[dict]         # specialty medians
+    peer_comparison: Optional[dict]         # ratio to median, percentile, z per metric
     scoring_complete: Optional[bool]
 
-    # ── Anomaly Detection Agent output ─────────────────────────────────────────
-    is_anomaly: Optional[bool]            # True if Isolation Forest flagged
-    anomaly_score: Optional[float]        # Raw IF score (more negative = worse)
-    anomaly_reason: Optional[str]         # Plain-English explanation
+    # ── Anomaly Agent ──────────────────────────────────────────────────────────
+    is_outlier: Optional[bool]
+    outlier_reasons: Optional[list[str]]
+    isolation_forest_percentile: Optional[float]   # 100 = most unusual in specialty
     anomaly_complete: Optional[bool]
 
-    # ── Summarizer Agent output ────────────────────────────────────────────────
-    performance_narrative: Optional[str]  # GPT-generated summary
-    narrative_faithfulness: Optional[float]  # RAGAS score
-    narrative_relevancy: Optional[float]     # RAGAS score
-    narrative_source: Optional[str]       # "llm" or "template" (fallback)
-    llm_tokens_used: Optional[int]        # tokens billed for the narrative
+    # ── Summarizer Agent ───────────────────────────────────────────────────────
+    performance_narrative: Optional[str]
+    narrative_source: Optional[str]   # "llm" or "template"
+    llm_tokens_used: Optional[int]
     summarizer_complete: Optional[bool]
 
-    # ── Reporter Agent output ──────────────────────────────────────────────────
-    network_recommendation: Optional[str] # include | review | exclude
-    scorecard: Optional[dict]             # Final structured scorecard JSON
+    # ── Reporter Agent ─────────────────────────────────────────────────────────
+    scorecard: Optional[dict]
     scorecard_version: Optional[str]
     pipeline_complete: Optional[bool]
 
 
 def initial_state(npi: str, run_id: str) -> AgentState:
-    """
-    Create a fresh AgentState for a new pipeline run.
-    All optional fields start as None — agents fill them in.
-    """
+    """Fresh state for a pipeline run. Agents fill in their own sections."""
     return AgentState(
         npi=npi,
         run_id=run_id,
@@ -79,27 +64,27 @@ def initial_state(npi: str, run_id: str) -> AgentState:
         agents_executed=[],
         agents_skipped=[],
         error=None,
-        data_quality_score=None,
-        fields_imputed=None,
+        provider_type=None,
+        city=None,
+        state=None,
+        data_completeness=None,
+        missing_fields=None,
         cleaning_notes=None,
         cleaning_complete=None,
-        quality_score=None,
-        quality_percentile=None,
-        cost_efficiency_ratio=None,
-        volume_percentile=None,
-        specialty_benchmarks=None,
+        billing_pattern_status=None,
+        peer_group_size=None,
+        provider_metrics=None,
+        peer_benchmarks=None,
+        peer_comparison=None,
         scoring_complete=None,
-        is_anomaly=None,
-        anomaly_score=None,
-        anomaly_reason=None,
+        is_outlier=None,
+        outlier_reasons=None,
+        isolation_forest_percentile=None,
         anomaly_complete=None,
         performance_narrative=None,
-        narrative_faithfulness=None,
-        narrative_relevancy=None,
         narrative_source=None,
         llm_tokens_used=0,
         summarizer_complete=None,
-        network_recommendation=None,
         scorecard=None,
         scorecard_version=None,
         pipeline_complete=None,

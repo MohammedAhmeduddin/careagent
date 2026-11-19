@@ -25,57 +25,56 @@ class AnalyzeRequest(BaseModel):
 
 # ── Response ───────────────────────────────────────────────────────────────────
 
+class MetricComparison(BaseModel):
+    label: str
+    ratio_to_peer_median: Optional[float] = Field(
+        None, description="Provider value / specialty median (risk-adjusted where noted)")
+    percentile: Optional[float] = Field(None, description="Within-specialty percentile, 0-100")
+    modified_z: Optional[float] = Field(None, description="Iglewicz-Hoaglin modified z-score")
+
+
 class ScorecardResponse(BaseModel):
     npi: str
     run_id: str
-    provider_name: Optional[str]
     provider_type: Optional[str]
+    city: Optional[str]
     state: Optional[str]
 
-    # Quality metrics
-    quality_score: Optional[float]
-    quality_percentile: Optional[float]
-    cost_efficiency_ratio: Optional[float]
-    volume_percentile: Optional[float]
+    billing_pattern_status: Optional[str] = Field(
+        None, description="typical | outlier | insufficient_peers | insufficient_data")
+    peer_group_size: Optional[int]
+    provider_metrics: Optional[dict]
+    peer_benchmarks: Optional[dict]
+    peer_comparison: Optional[dict[str, MetricComparison]]
 
-    # Anomaly
-    is_anomaly: Optional[bool]
-    anomaly_score: Optional[float]
-    anomaly_reason: Optional[str]
+    is_outlier: Optional[bool]
+    outlier_reasons: list[str]
+    isolation_forest_percentile: Optional[float] = Field(
+        None, description="Multivariate unusualness within the specialty; 100 = most unusual")
 
-    # Data quality
-    data_quality_score: Optional[float]
-    fields_imputed: Optional[int]
+    data_completeness: Optional[float]
+    missing_fields: list[str]
 
-    # Narrative
     performance_narrative: Optional[str]
-    narrative_faithfulness: Optional[float]
-    narrative_relevancy: Optional[float]
     narrative_source: Optional[str] = Field(
-        default=None,
-        description='"llm" if the model wrote the narrative, "template" if it fell back',
-    )
+        None, description='"llm" if the model wrote it (and it passed the number check), else "template"')
+    disclaimer: str
 
-    # Recommendation
-    network_recommendation: Optional[str]
     scorecard_version: Optional[str]
-
-    # Pipeline metadata
     agents_executed: list[str]
     agents_skipped: list[str]
     pipeline_duration_seconds: Optional[float]
     generated_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 class HealthResponse(BaseModel):
     status: str
     database: str
     providers_loaded: int
-    providers_scored: int
-    anomalies_flagged: int
-    version: str = "0.1.0"
+    providers_compared: int
+    outliers_flagged: int
+    peer_groups: int
+    version: str = "2.0.0"
 
 
 class ErrorResponse(BaseModel):

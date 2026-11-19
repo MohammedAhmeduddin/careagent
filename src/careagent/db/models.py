@@ -1,15 +1,21 @@
 """
 careagent.db.models
 ~~~~~~~~~~~~~~~~~~~
-SQLAlchemy ORM models for the CareAgent provider data warehouse.
+SQLAlchemy ORM models.
+
+Source data: CMS "Medicare Physician & Other Practitioners - by Provider"
+(one row per NPI). Peer comparisons are computed once at load time by
+careagent.scoring.peer and stored here; agents read them per request.
+
+Provider names and street addresses are deliberately not stored: the demo
+is public, and a billing-pattern outlier is not a finding about a person.
 """
 
 from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
-    Boolean, DateTime, Float, ForeignKey,
-    Index, Integer, String, Text, func,
+    DateTime, Float, ForeignKey, Index, Integer, String, Text, func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -21,113 +27,93 @@ class Base(DeclarativeBase):
 class Provider(Base):
     __tablename__ = "providers"
 
-    # Identity
+    # Identity (no names)
     npi: Mapped[str] = mapped_column(String(10), primary_key=True)
-    entity_type: Mapped[str] = mapped_column(String(1), nullable=False)
-    last_name_or_org: Mapped[str] = mapped_column(String(100), nullable=False)
-    first_name: Mapped[Optional[str]] = mapped_column(String(50))
-    credentials: Mapped[Optional[str]] = mapped_column(String(50))
-    gender: Mapped[Optional[str]] = mapped_column(String(1))
-    provider_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    medicare_participation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    entity_type: Mapped[Optional[str]] = mapped_column(String(1))
+    provider_type: Mapped[Optional[str]] = mapped_column(String(100))
+    medicare_participating: Mapped[Optional[str]] = mapped_column(String(1))
 
     # Location
-    street: Mapped[Optional[str]] = mapped_column(String(200))
     city: Mapped[Optional[str]] = mapped_column(String(100))
     state: Mapped[Optional[str]] = mapped_column(String(2))
     zip_code: Mapped[Optional[str]] = mapped_column(String(10))
-    country: Mapped[Optional[str]] = mapped_column(String(2), default="US")
+    ruca_code: Mapped[Optional[str]] = mapped_column(String(10))
 
-    # Volume metrics
+    # CMS totals
+    total_hcpcs_codes: Mapped[Optional[float]] = mapped_column(Float)
+    total_beneficiaries: Mapped[Optional[float]] = mapped_column(Float)
     total_services: Mapped[Optional[float]] = mapped_column(Float)
-    total_unique_beneficiaries: Mapped[Optional[float]] = mapped_column(Float)
-    distinct_procedure_count: Mapped[Optional[int]] = mapped_column(Integer)
+    total_submitted_charges: Mapped[Optional[float]] = mapped_column(Float)
+    total_allowed_amount: Mapped[Optional[float]] = mapped_column(Float)
+    total_medicare_payment: Mapped[Optional[float]] = mapped_column(Float)
+    total_standardized_payment: Mapped[Optional[float]] = mapped_column(Float)
+    bene_avg_age: Mapped[Optional[float]] = mapped_column(Float)
+    bene_avg_risk_score: Mapped[Optional[float]] = mapped_column(Float)
 
-    # Cost metrics
-    avg_medicare_payment: Mapped[Optional[float]] = mapped_column(Float)
-    avg_submitted_charge: Mapped[Optional[float]] = mapped_column(Float)
-    avg_allowed_amount: Mapped[Optional[float]] = mapped_column(Float)
+    # Derived metrics
+    cost_per_beneficiary: Mapped[Optional[float]] = mapped_column(Float)
+    services_per_beneficiary: Mapped[Optional[float]] = mapped_column(Float)
+    charge_to_allowed_ratio: Mapped[Optional[float]] = mapped_column(Float)
+    data_completeness: Mapped[Optional[float]] = mapped_column(Float)
 
-    # Quality fields (populated by Statistical Agent)
-    quality_score: Mapped[Optional[float]] = mapped_column(Float)
-    quality_percentile: Mapped[Optional[float]] = mapped_column(Float)
-    cost_efficiency_ratio: Mapped[Optional[float]] = mapped_column(Float)
-    volume_percentile: Mapped[Optional[float]] = mapped_column(Float)
+    # Peer comparison (computed at load time)
+    peer_group_size: Mapped[Optional[int]] = mapped_column(Integer)
+    cost_z: Mapped[Optional[float]] = mapped_column(Float)
+    cost_ratio_to_peer_median: Mapped[Optional[float]] = mapped_column(Float)
+    cost_percentile: Mapped[Optional[float]] = mapped_column(Float)
+    services_z: Mapped[Optional[float]] = mapped_column(Float)
+    services_ratio_to_peer_median: Mapped[Optional[float]] = mapped_column(Float)
+    services_percentile: Mapped[Optional[float]] = mapped_column(Float)
+    charge_z: Mapped[Optional[float]] = mapped_column(Float)
+    charge_ratio_to_peer_median: Mapped[Optional[float]] = mapped_column(Float)
+    charge_percentile: Mapped[Optional[float]] = mapped_column(Float)
+    isolation_forest_percentile: Mapped[Optional[float]] = mapped_column(Float)
+    billing_pattern_status: Mapped[Optional[str]] = mapped_column(String(30))
+    outlier_reasons: Mapped[Optional[str]] = mapped_column(Text)
 
-    # Anomaly fields (populated by Anomaly Agent)
-    is_anomaly: Mapped[Optional[bool]] = mapped_column(Boolean)
-    anomaly_score: Mapped[Optional[float]] = mapped_column(Float)
-    anomaly_reason: Mapped[Optional[str]] = mapped_column(Text)
-
-    # Data quality fields (populated by Data Cleaner Agent)
-    data_quality_score: Mapped[Optional[float]] = mapped_column(Float)
-    fields_imputed: Mapped[Optional[int]] = mapped_column(Integer)
-    cleaning_notes: Mapped[Optional[str]] = mapped_column(Text)
-
-    # Narrative (populated by Summarizer Agent)
+    # Written by the agents
+    validation_notes: Mapped[Optional[str]] = mapped_column(Text)
     performance_narrative: Mapped[Optional[str]] = mapped_column(Text)
-    narrative_faithfulness: Mapped[Optional[float]] = mapped_column(Float)
-    narrative_relevancy: Mapped[Optional[float]] = mapped_column(Float)
-
-    # Scorecard (populated by Reporter Agent)
-    network_recommendation: Mapped[Optional[str]] = mapped_column(String(50))
+    narrative_source: Mapped[Optional[str]] = mapped_column(String(20))
     scorecard_version: Mapped[Optional[str]] = mapped_column(String(20))
-    last_scored_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_scored_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     # Record metadata
-    cms_data_year: Mapped[int] = mapped_column(Integer, nullable=False, default=2022)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    cms_data_year: Mapped[int] = mapped_column(Integer, nullable=False, default=2024)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    # Relationships
-    services: Mapped[list["ProviderService"]] = relationship(
-        "ProviderService", back_populates="provider", cascade="all, delete-orphan"
-    )
     agent_runs: Mapped[list["AgentRun"]] = relationship(
-        "AgentRun", back_populates="provider"
+        "AgentRun", back_populates="provider", cascade="all, delete-orphan"
     )
 
     __table_args__ = (
         Index("ix_providers_state", "state"),
         Index("ix_providers_provider_type", "provider_type"),
-        Index("ix_providers_is_anomaly", "is_anomaly"),
-        Index("ix_providers_network_recommendation", "network_recommendation"),
+        Index("ix_providers_billing_pattern_status", "billing_pattern_status"),
     )
 
     def __repr__(self) -> str:
-        return f"<Provider npi={self.npi} name={self.last_name_or_org}>"
+        return f"<Provider npi={self.npi} type={self.provider_type}>"
 
 
-class ProviderService(Base):
-    __tablename__ = "provider_services"
+class PeerGroup(Base):
+    """One row per specialty that had enough providers to compare."""
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    npi: Mapped[str] = mapped_column(String(10), ForeignKey("providers.npi", ondelete="CASCADE"), nullable=False)
-    hcpcs_code: Mapped[str] = mapped_column(String(10), nullable=False)
-    hcpcs_description: Mapped[Optional[str]] = mapped_column(String(256))
-    place_of_service: Mapped[Optional[str]] = mapped_column(String(1))
-    is_drug_indicator: Mapped[Optional[bool]] = mapped_column(Boolean)
+    __tablename__ = "peer_groups"
 
-    line_service_count: Mapped[Optional[float]] = mapped_column(Float)
-    beneficiary_unique_count: Mapped[Optional[float]] = mapped_column(Float)
-    beneficiary_day_service_count: Mapped[Optional[float]] = mapped_column(Float)
-    avg_medicare_allowed_amt: Mapped[Optional[float]] = mapped_column(Float)
-    avg_submitted_charge_amt: Mapped[Optional[float]] = mapped_column(Float)
-    avg_medicare_payment_amt: Mapped[Optional[float]] = mapped_column(Float)
-    avg_medicare_standardized_amt: Mapped[Optional[float]] = mapped_column(Float)
-
-    cms_data_year: Mapped[int] = mapped_column(Integer, nullable=False, default=2022)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
-
-    provider: Mapped["Provider"] = relationship("Provider", back_populates="services")
-
-    __table_args__ = (
-        Index("ix_services_npi", "npi"),
-        Index("ix_services_hcpcs_code", "hcpcs_code"),
-    )
+    provider_type: Mapped[str] = mapped_column(String(100), primary_key=True)
+    peer_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    outlier_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    median_cost_per_beneficiary: Mapped[float] = mapped_column(Float, nullable=False)
+    median_services_per_beneficiary: Mapped[float] = mapped_column(Float, nullable=False)
+    median_charge_to_allowed_ratio: Mapped[float] = mapped_column(Float, nullable=False)
+    median_risk_score: Mapped[float] = mapped_column(Float, nullable=False)
+    cost_risk_slope: Mapped[float] = mapped_column(Float, nullable=False)
+    services_risk_slope: Mapped[float] = mapped_column(Float, nullable=False)
+    cms_data_year: Mapped[int] = mapped_column(Integer, nullable=False, default=2024)
 
     def __repr__(self) -> str:
-        return f"<ProviderService npi={self.npi} hcpcs={self.hcpcs_code}>"
+        return f"<PeerGroup {self.provider_type} n={self.peer_count}>"
 
 
 class AgentRun(Base):
@@ -135,7 +121,7 @@ class AgentRun(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    npi: Mapped[str] = mapped_column(String(10), ForeignKey("providers.npi"), nullable=False)
+    npi: Mapped[str] = mapped_column(String(10), ForeignKey("providers.npi", ondelete="CASCADE"), nullable=False)
 
     agents_executed: Mapped[Optional[str]] = mapped_column(Text)
     agents_skipped: Mapped[Optional[str]] = mapped_column(Text)
@@ -144,13 +130,12 @@ class AgentRun(Base):
     llm_tokens_used: Mapped[Optional[int]] = mapped_column(Integer)
     llm_calls_made: Mapped[Optional[int]] = mapped_column(Integer)
 
-    final_recommendation: Mapped[Optional[str]] = mapped_column(String(50))
+    final_status: Mapped[Optional[str]] = mapped_column(String(30))
     error_message: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
-    mlflow_run_id: Mapped[Optional[str]] = mapped_column(String(64))
 
-    started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     provider: Mapped["Provider"] = relationship("Provider", back_populates="agent_runs")
 

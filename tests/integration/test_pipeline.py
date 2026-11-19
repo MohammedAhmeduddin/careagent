@@ -1,102 +1,135 @@
 """
-tests/integration/test_pipeline.py
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-End-to-end integration tests for the full CareAgent pipeline.
-Requires a running PostgreSQL database with loaded provider data.
+End-to-end tests against a real PostgreSQL: load -> LangGraph pipeline -> API.
 
-Run with:
-    PYTHONPATH=src pytest tests/integration/ -v --no-cov
+These REPLACE the database contents, so they only run when both hold:
+  - RUN_INTEGRATION=1
+  - the database is local (POSTGRES_HOST localhost/127.0.0.1, no DATABASE_URL)
+CI runs them against a Postgres service container.
 
-Skipped automatically in CI (no database available).
+    RUN_INTEGRATION=1 POSTGRES_SSLMODE=disable PYTHONPATH=src pytest tests/integration
 """
 
-import pytest
+import os
 import uuid
-from careagent.db.session import check_connection, SessionLocal
-from careagent.db.queries import get_provider_by_npi, get_providers_for_scoring
-from careagent.graph.state import initial_state
-from careagent.graph.workflow import careagent_graph
 
+import pytest
 
-# Skip entire module if database not reachable
+from careagent.config import get_settings
+
+settings = get_settings()
+LOCAL = settings.postgres_host in ("localhost", "127.0.0.1") and not settings.database_url_env
+
 pytestmark = pytest.mark.skipif(
-    not check_connection(),
-    reason="PostgreSQL not available — skipping integration tests",
+    not (os.environ.get("RUN_INTEGRATION") == "1" and LOCAL),
+    reason="Integration tests need RUN_INTEGRATION=1 and a local PostgreSQL",
+)
+
+from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import select  # noqa: E402
+
+from careagent.api.main import app  # noqa: E402
+from careagent.db.models import AgentRun, PeerGroup, Provider  # noqa: E402
+from careagent.db.session import SessionLocal, get_db, reset_schema  # noqa: E402
+from careagent.graph.state import initial_state  # noqa: E402
+from careagent.graph.workflow import careagent_graph  # noqa: E402
+from careagent.scoring.load import load_dataframe  # noqa: E402
+from careagent.scoring.peer import DISCLAIMER  # noqa: E402
+from tests.conftest import (  # noqa: E402
+    MISSING_DATA_NPI, OUTLIER_COST_NPI, SMALL_GROUP_NPI, TYPICAL_NPI, make_cms_frame,
 )
 
 
+@pytest.fixture(scope="module", autouse=True)
+def loaded_db():
+    reset_schema()
+    with get_db() as db:
+        counts = load_dataframe(db, make_cms_frame(), year=2024)
+    return counts
+
+
 @pytest.fixture(scope="module")
-def real_npi() -> str:
-    """Fetch a real NPI from the database for testing."""
-    with SessionLocal() as db:
-        providers = get_providers_for_scoring(db, limit=1)
-        if not providers:
-            pytest.skip("No unscored providers in database")
-        return providers[0].npi
+def client():
+    return TestClient(app)
 
 
-class TestFullPipeline:
+def run(npi):
+    return careagent_graph.invoke(initial_state(npi=npi, run_id=str(uuid.uuid4())))
 
-    def test_pipeline_completes_without_error(self, real_npi):
-        state  = initial_state(npi=real_npi, run_id=str(uuid.uuid4()))
-        result = careagent_graph.invoke(state)
-        assert result.get("error") is None
-        assert result.get("pipeline_complete") is True
 
-    def test_pipeline_produces_quality_score(self, real_npi):
-        state  = initial_state(npi=real_npi, run_id=str(uuid.uuid4()))
-        result = careagent_graph.invoke(state)
-        assert result.get("quality_score") is not None
-        assert 0.0 <= result["quality_score"] <= 100.0
+class TestLoad:
+    def test_counts(self, loaded_db):
+        assert loaded_db["providers"] == 105
+        assert loaded_db["peer_groups"] == 2
+        assert loaded_db["outlier"] == 2
 
-    def test_pipeline_produces_anomaly_flag(self, real_npi):
-        state  = initial_state(npi=real_npi, run_id=str(uuid.uuid4()))
-        result = careagent_graph.invoke(state)
-        assert result.get("is_anomaly") is not None
-        assert isinstance(result["is_anomaly"], (bool, __import__("numpy").bool_))
-
-    def test_pipeline_produces_narrative(self, real_npi):
-        state  = initial_state(npi=real_npi, run_id=str(uuid.uuid4()))
-        result = careagent_graph.invoke(state)
-        assert result.get("performance_narrative") is not None
-        assert len(result["performance_narrative"]) > 20
-
-    def test_pipeline_produces_recommendation(self, real_npi):
-        state  = initial_state(npi=real_npi, run_id=str(uuid.uuid4()))
-        result = careagent_graph.invoke(state)
-        assert result.get("network_recommendation") in ["include", "review", "exclude"]
-
-    def test_pipeline_tracks_agents_executed(self, real_npi):
-        state  = initial_state(npi=real_npi, run_id=str(uuid.uuid4()))
-        result = careagent_graph.invoke(state)
-        executed = result.get("agents_executed", [])
-        assert "statistical" in executed
-        assert "anomaly"     in executed
-        assert "summarizer"  in executed
-        assert "reporter"    in executed
-
-    def test_pipeline_writes_to_database(self, real_npi):
-        state  = initial_state(npi=real_npi, run_id=str(uuid.uuid4()))
-        careagent_graph.invoke(state)
+    def test_rows_in_database(self):
         with SessionLocal() as db:
-            provider = get_provider_by_npi(db, real_npi)
-        assert provider.quality_score is not None
-        assert provider.is_anomaly    is not None
-        assert provider.network_recommendation is not None
+            assert db.get(Provider, OUTLIER_COST_NPI).billing_pattern_status == "outlier"
+            assert db.get(Provider, MISSING_DATA_NPI).bene_avg_risk_score is None
+            assert db.get(PeerGroup, "Cardiology").peer_count == 59
 
-    def test_pipeline_completes_under_30_seconds(self, real_npi):
-        import time
-        state = initial_state(npi=real_npi, run_id=str(uuid.uuid4()))
-        start = time.perf_counter()
-        careagent_graph.invoke(state)
-        duration = time.perf_counter() - start
-        assert duration < 30.0, f"Pipeline took {duration:.1f}s — exceeds 30s limit"
+    def test_reload_replaces_instead_of_duplicating(self):
+        with get_db() as db:
+            load_dataframe(db, make_cms_frame(), year=2024)
+        with SessionLocal() as db:
+            assert len(db.scalars(select(Provider.npi)).all()) == 105
 
-    def test_clean_provider_skips_data_cleaner(self, real_npi):
-        """Proves dynamic routing — clean data skips the cleaner."""
-        state  = initial_state(npi=real_npi, run_id=str(uuid.uuid4()))
-        result = careagent_graph.invoke(state)
-        # Provider with quality=1.0 should skip cleaner
-        if result.get("data_quality_score") == 1.0:
-            assert "data_cleaner" in result.get("agents_skipped", []) or \
-                   result.get("fields_imputed") == 0
+
+class TestGraph:
+    def test_outlier_path(self):
+        out = run(OUTLIER_COST_NPI)
+        assert out["error"] is None and out["pipeline_complete"]
+        assert out["is_outlier"] is True and out["outlier_reasons"]
+        assert out["agents_executed"] == ["data_cleaner", "statistical", "anomaly",
+                                          "summarizer", "reporter"]
+
+    def test_typical_path(self):
+        out = run(TYPICAL_NPI)
+        assert out["billing_pattern_status"] == "typical" and out["is_outlier"] is False
+
+    def test_small_specialty_skips_anomaly(self):
+        out = run(SMALL_GROUP_NPI)
+        assert out["billing_pattern_status"] == "insufficient_peers"
+        assert out["agents_skipped"] == ["anomaly"]
+        assert "anomaly" not in out["agents_executed"]
+
+    def test_missing_data_skips_anomaly_and_names_fields(self):
+        out = run(MISSING_DATA_NPI)
+        assert out["billing_pattern_status"] == "insufficient_data"
+        assert "bene_avg_risk_score" in out["missing_fields"]
+        assert "bene_avg_risk_score" in out["performance_narrative"]
+
+    def test_results_written_back(self):
+        run(TYPICAL_NPI)
+        with SessionLocal() as db:
+            p = db.get(Provider, TYPICAL_NPI)
+            assert p.performance_narrative.endswith(DISCLAIMER)
+            assert p.narrative_source == "template"
+            assert p.last_scored_at is not None
+
+
+class TestApi:
+    def test_analyze_and_agent_run_logged(self, client):
+        resp = client.post("/analyze", json={"npi": OUTLIER_COST_NPI})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["billing_pattern_status"] == "outlier"
+        assert data["peer_benchmarks"]["peer_count"] == 59
+        with SessionLocal() as db:
+            run_row = db.scalars(select(AgentRun).where(AgentRun.run_id == data["run_id"])).one()
+            assert run_row.status == "completed" and run_row.final_status == "outlier"
+
+    def test_unknown_npi(self, client):
+        assert client.post("/analyze", json={"npi": "9999999999"}).status_code == 404
+
+    def test_health(self, client):
+        data = client.get("/health").json()
+        assert data["status"] == "healthy"
+        assert data["providers_loaded"] == 105
+        assert data["outliers_flagged"] == 2
+        assert data["peer_groups"] == 2
+
+    def test_root_examples_are_real_npis(self, client):
+        examples = client.get("/").json()["example_npis"]
+        assert examples["outlier"] in (OUTLIER_COST_NPI, "1000000002")
+        assert examples["insufficient_peers"].startswith("3")

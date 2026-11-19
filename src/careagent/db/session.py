@@ -21,7 +21,7 @@ engine = create_engine(
     pool_size=5,
     max_overflow=10,
     pool_pre_ping=True,
-    echo=(settings.app_env == "development"),
+    echo=settings.log_level.upper() == "DEBUG",
 )
 
 SessionLocal = sessionmaker(
@@ -36,6 +36,20 @@ def create_tables() -> None:
     logger.info("Creating database tables...")
     Base.metadata.create_all(bind=engine)
     logger.info("Tables ready.")
+
+
+LEGACY_TABLES = ["provider_services"]
+
+
+def reset_schema() -> None:
+    """Drop and recreate all tables, including tables from the old schema."""
+    logger.warning("Dropping all CareAgent tables...")
+    with engine.begin() as conn:
+        for table in LEGACY_TABLES:
+            conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
+        for table in reversed(Base.metadata.sorted_tables):
+            conn.execute(text(f"DROP TABLE IF EXISTS {table.name} CASCADE"))
+    create_tables()
 
 
 def check_connection() -> bool:

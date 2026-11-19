@@ -1,67 +1,57 @@
 """
 careagent.agents.reporter
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
-Reporter Agent — assembles final structured scorecard.
-Week 2: stub. Full scorecard formatting in Week 4.
+Reporter agent: assembles the final scorecard.
+
+The outcome is a billing-pattern status (typical / outlier /
+insufficient_peers / insufficient_data), not a network decision: Medicare
+billing data alone cannot justify including or excluding a provider.
+Every scorecard carries the disclaimer.
 """
 
-from datetime import datetime, UTC
-from loguru import logger
-from careagent.graph.state import AgentState
-from careagent.db.session import get_db
-from careagent.db.queries import get_provider_by_npi, update_provider_recommendation
-from careagent.config import get_settings
+from datetime import UTC, datetime
 
-settings = get_settings()
-SCORECARD_VERSION = "0.1.0"
+from loguru import logger
+
+from careagent.db.queries import update_provider_report
+from careagent.db.session import get_db
+from careagent.graph.state import AgentState
+from careagent.scoring.peer import DISCLAIMER
+
+SCORECARD_VERSION = "2.0.0"
 
 
 def reporter_agent(state: AgentState) -> AgentState:
-    """Assembles the final scorecard and sets network recommendation."""
     npi = state["npi"]
-    logger.info(f"[Reporter] Processing NPI={npi}")
-
-    quality    = state.get("quality_score") or 0.0
-    is_anomaly = state.get("is_anomaly") or False
-
-    # Recommendation logic
-    if is_anomaly or quality < settings.quality_score_review_threshold:
-        recommendation = "review"
-    elif quality >= 75.0:
-        recommendation = "include"
-    else:
-        recommendation = "review"
-
     scorecard = {
-        "npi":                    npi,
-        "run_id":                 state["run_id"],
-        "quality_score":          quality,
-        "quality_percentile":     state.get("quality_percentile"),
-        "cost_efficiency_ratio":  state.get("cost_efficiency_ratio"),
-        "is_anomaly":             is_anomaly,
-        "anomaly_reason":         state.get("anomaly_reason"),
-        "performance_narrative":  state.get("performance_narrative"),
-        "network_recommendation": recommendation,
-        "agents_executed":        state.get("agents_executed", []),
-        "agents_skipped":         state.get("agents_skipped", []),
-        "scorecard_version":      SCORECARD_VERSION,
-        "generated_at":           datetime.now(UTC).isoformat(),
+        "npi": npi,
+        "run_id": state["run_id"],
+        "provider_type": state.get("provider_type"),
+        "city": state.get("city"),
+        "state": state.get("state"),
+        "billing_pattern_status": state.get("billing_pattern_status"),
+        "peer_group_size": state.get("peer_group_size"),
+        "provider_metrics": state.get("provider_metrics"),
+        "peer_benchmarks": state.get("peer_benchmarks"),
+        "peer_comparison": state.get("peer_comparison"),
+        "is_outlier": state.get("is_outlier"),
+        "outlier_reasons": state.get("outlier_reasons") or [],
+        "isolation_forest_percentile": state.get("isolation_forest_percentile"),
+        "data_completeness": state.get("data_completeness"),
+        "performance_narrative": state.get("performance_narrative"),
+        "narrative_source": state.get("narrative_source"),
+        "disclaimer": DISCLAIMER,
+        "scorecard_version": SCORECARD_VERSION,
+        "generated_at": datetime.now(UTC).isoformat(),
     }
-
     with get_db() as db:
-        update_provider_recommendation(db, npi,
-            recommendation=recommendation,
-            scorecard_version=SCORECARD_VERSION,
-        )
+        update_provider_report(db, npi, scorecard_version=SCORECARD_VERSION)
 
-    executed = state.get("agents_executed", []) + ["reporter"]
-    logger.info(f"[Reporter] NPI={npi} recommendation={recommendation}")
-
+    logger.info(f"[Reporter] NPI={npi} status={scorecard['billing_pattern_status']}")
     return {
         **state,
-        "network_recommendation": recommendation,
-        "scorecard":              scorecard,
-        "scorecard_version":      SCORECARD_VERSION,
-        "pipeline_complete":      True,
-        "agents_executed":        executed,
+        "scorecard": scorecard,
+        "scorecard_version": SCORECARD_VERSION,
+        "pipeline_complete": True,
+        "agents_executed": state.get("agents_executed", []) + ["reporter"],
     }
