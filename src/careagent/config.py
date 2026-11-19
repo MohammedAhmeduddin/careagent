@@ -14,6 +14,9 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        # Ignore variables this version doesn't use (e.g. MLFLOW_TRACKING_URI in an
+        # older .env or Cloud Run config) instead of refusing to start.
+        extra="ignore",
     )
 
     # App

@@ -38,6 +38,14 @@ class TestDatabaseUrl:
         assert Settings(_env_file=None).database_url == "postgresql+psycopg2://u:p@h/db"
 
 
+def test_unknown_env_vars_are_ignored(monkeypatch, tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("MLFLOW_TRACKING_URI=http://localhost:5002\nPOSTGRES_HOST=h\n")
+    monkeypatch.setenv("SOME_OLD_SETTING", "x")
+    monkeypatch.delenv("POSTGRES_HOST", raising=False)
+    assert Settings(_env_file=env).postgres_host == "h"
+
+
 class TestClean:
     @pytest.mark.parametrize("value", [None, float("nan"), np.float64("nan"), pd.NA])
     def test_missing_becomes_none(self, value):
