@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str = Field(default="")
     openai_model: str = Field(default="gpt-4o-mini")
+    openai_temperature: float = Field(default=0.1)
+    openai_max_completion_tokens: int = Field(default=400)
+    openai_timeout_seconds: float = Field(default=20.0)
+    openai_max_retries: int = Field(default=1)
 
     # LangSmith
     langchain_tracing_v2: bool = Field(default=False)

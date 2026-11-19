@@ -14,7 +14,7 @@ RAGAS evaluation runs on a sample of outputs to measure:
 
 import json
 from loguru import logger
-from openai import OpenAI, APIError
+from openai import BadRequestError, OpenAI
 from careagent.graph.state import AgentState
 from careagent.db.session import get_db
 from careagent.db.queries import get_provider_by_npi, update_provider_narrative
@@ -51,6 +51,10 @@ NARRATIVE_FUNCTION = {
         "required": ["narrative", "key_strengths", "key_concerns"],
     },
 }
+
+# Same schema in the current "tools" format (the older functions= parameter
+# is deprecated and not supported by every newer model).
+NARRATIVE_TOOL = {"type": "function", "function": NARRATIVE_FUNCTION}
 
 
 def _build_prompt(provider, state: AgentState) -> str:
@@ -109,14 +113,8 @@ def _template_narrative(provider, state: AgentState) -> str:
     )
 
 
-def _call_gpt(prompt: str) -> tuple[str, int]:
-    """
-    Call GPT-4o-mini with structured output.
-    Returns (narrative_json_str, tokens_used).
-    Raises APIError on failure.
-    """
-    client = OpenAI(api_key=settings.openai_api_key)
-    response = client.chat.completions.create(
+def _create_completion(client: OpenAI, prompt: str, with_temperature: bool):
+    kwargs = dict(
         model=settings.openai_model,
         messages=[
             {
@@ -129,19 +127,48 @@ def _call_gpt(prompt: str) -> tuple[str, int]:
             },
             {"role": "user", "content": prompt},
         ],
-        functions=[NARRATIVE_FUNCTION],
-        function_call={"name": "generate_provider_narrative"},
-        temperature=0.1,  # Low temperature for factual consistency
-        max_tokens=400,
+        tools=[NARRATIVE_TOOL],
+        tool_choice={
+            "type": "function",
+            "function": {"name": NARRATIVE_FUNCTION["name"]},
+        },
+        max_completion_tokens=settings.openai_max_completion_tokens,
     )
+    if with_temperature:
+        kwargs["temperature"] = settings.openai_temperature  # low = factual
+    return client.chat.completions.create(**kwargs)
+
+
+def _call_gpt(prompt: str) -> tuple[str, int]:
+    """
+    Call the configured OpenAI model with structured (tool) output.
+    Returns (narrative_json_str, tokens_used). Raises on failure.
+
+    Some newer models reject a custom temperature; in that case the call is
+    retried once without it instead of failing.
+    """
+    client = OpenAI(
+        api_key=settings.openai_api_key,
+        timeout=settings.openai_timeout_seconds,
+        max_retries=settings.openai_max_retries,
+    )
+    try:
+        response = _create_completion(client, prompt, with_temperature=True)
+    except BadRequestError as e:
+        if "temperature" not in str(e).lower():
+            raise
+        logger.info("[Summarizer] Model rejects temperature; retrying without it")
+        response = _create_completion(client, prompt, with_temperature=False)
+
     tokens = response.usage.total_tokens if response.usage else 0
-    args   = response.choices[0].message.function_call.arguments
+    args = response.choices[0].message.tool_calls[0].function.arguments
     return args, tokens
 
 
 def summarizer_agent(state: AgentState) -> AgentState:
     """
-    Generates a provider performance narrative using GPT-4o-mini.
+    Generates a provider performance narrative with the configured OpenAI model
+    (settings.openai_model). Sets narrative_source to "llm" or "template".
 
     Falls back to template narrative if:
     - OpenAI API key not configured
@@ -179,16 +206,22 @@ def summarizer_agent(state: AgentState) -> AgentState:
                     f"[Summarizer] GPT narrative generated "
                     f"({tokens_used} tokens) for NPI={npi}"
                 )
-            except (APIError, json.JSONDecodeError, KeyError) as e:
-                logger.warning(f"[Summarizer] GPT failed ({e}) — using template")
+            except Exception as e:  # any failure → documented template fallback
+                logger.warning(
+                    f"[Summarizer] LLM call failed ({type(e).__name__}: {e}) "
+                    f"for NPI={npi}; using template narrative"
+                )
                 used_fallback = True
+                tokens_used = 0
         else:
             logger.info("[Summarizer] No API key — using template narrative")
             used_fallback = True
 
         # ── Fallback ───────────────────────────────────────────────────────────
+        narrative_source = "llm"
         if used_fallback or not narrative:
             narrative = _template_narrative(provider, state)
+            narrative_source = "template"
 
         # ── Write to database ──────────────────────────────────────────────────
         update_provider_narrative(
@@ -199,13 +232,15 @@ def summarizer_agent(state: AgentState) -> AgentState:
         )
 
     executed = state.get("agents_executed", []) + ["summarizer"]
-    logger.info(f"[Summarizer] NPI={npi} complete (fallback={used_fallback})")
+    logger.info(f"[Summarizer] NPI={npi} complete (source={narrative_source})")
 
     return {
         **state,
         "performance_narrative":  narrative,
         "narrative_faithfulness": None,
         "narrative_relevancy":    None,
+        "narrative_source":       narrative_source,
+        "llm_tokens_used":        tokens_used,
         "summarizer_complete":    True,
         "agents_executed":        executed,
     }

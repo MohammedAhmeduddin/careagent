@@ -3,7 +3,7 @@
 <img src="https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white"/>
 <img src="https://img.shields.io/badge/LangGraph-Multi--Agent-7C3AED?style=flat-square"/>
 <img src="https://img.shields.io/badge/FastAPI-0.110-009688?style=flat-square&logo=fastapi&logoColor=white"/>
-<img src="https://img.shields.io/badge/Tests-99%20passed-22C55E?style=flat-square"/>
+<img src="https://img.shields.io/badge/Tests-106%20total-22C55E?style=flat-square"/>
 <img src="https://img.shields.io/badge/Coverage-92%25-22C55E?style=flat-square"/>
 <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white"/>
 <img src="https://img.shields.io/badge/GCP-Cloud%20Run-4285F4?style=flat-square&logo=googlecloud&logoColor=white"/>
@@ -68,8 +68,8 @@ A single API call ingests a provider NPI, routes it through five specialized age
 | Procedure rows | **54,987** across 15 HCPCS codes |
 | Specialties covered | **20** |
 | Anomaly detection rate | **3.0%** — 300 / 9,985 providers flagged |
-| Test coverage | **92.42%** |
-| Total tests | **99** — 90 unit · 9 integration |
+| Test coverage | **92.2%** (database layer, enforced at 85% in CI) |
+| Total tests | **106** — 97 unit · 9 integration |
 | Deployment | GCP Cloud Run + Neon PostgreSQL + HuggingFace Spaces |
 
 ---
@@ -134,10 +134,11 @@ Composite quality score (0–100) benchmarked against specialty national average
 - Confirmed 300 / 9,985 providers flagged — exactly 3.0% in production
 
 ### 4 · Provider Performance Narrative Agent
-- GPT-4o-mini with **function calling** for structured JSON output
+- OpenAI model set by `OPENAI_MODEL` (default GPT-4o-mini), with **tool calling** for structured JSON output
+- 20-second timeout and one retry; models that reject a custom temperature are retried without it
 - Temperature 0.1 for factual consistency
 - Data-grounded prompt — no hallucination beyond source fields
-- **Template fallback** when API key unavailable — zero downtime
+- **Template fallback** when the API key is missing or the call fails; every response reports `narrative_source` (`llm` or `template`) so a fallback is never silent
 
 ### 5 · Reporter Agent
 - Assembles final scorecard JSON
@@ -151,7 +152,7 @@ Composite quality score (0–100) benchmarked against specialty national average
 | Layer | Technology | Justification |
 |---|---|---|
 | Agent orchestration | **LangGraph StateGraph** | Purpose-built for stateful multi-agent workflows with cycles |
-| LLM | **GPT-4o-mini + function calling** | Structured JSON output, hallucination control |
+| LLM | **OpenAI (configurable) + tool calling** | Structured JSON output, hallucination control |
 | Anomaly detection | **Isolation Forest** (scikit-learn) | Unsupervised — no labelled anomalies needed |
 | Database | **PostgreSQL 16 + SQLAlchemy 2** | Typed ORM, all agent outputs pre-reserved in schema |
 | Cloud database | **Neon.tech** | Serverless PostgreSQL, free tier, SSL |
@@ -175,7 +176,7 @@ careagent/
 │   │   ├── data_cleaner.py      # Specialty median imputation via PostgreSQL
 │   │   ├── statistical.py       # Composite quality score vs national benchmarks
 │   │   ├── anomaly.py           # Isolation Forest across full provider set
-│   │   ├── summarizer.py        # GPT-4o-mini + template fallback
+│   │   ├── summarizer.py        # LLM narrative + visible template fallback
 │   │   └── reporter.py          # Scorecard assembly + recommendation
 │   ├── graph/
 │   │   ├── state.py             # AgentState TypedDict — 25 typed fields
@@ -195,7 +196,7 @@ careagent/
 │   ├── load_cms_data.py         # CMS ingestion — upsert, idempotent, column-mapped
 │   └── generate_synthetic_cms.py
 ├── tests/
-│   ├── unit/                    # 90 tests — SQLite in-memory, no PostgreSQL needed
+│   ├── unit/                    # 97 tests — SQLite in-memory, no PostgreSQL needed
 │   └── integration/             # 9 tests — requires live PostgreSQL
 ├── app.py                       # Streamlit dashboard — live stepper + scorecard
 ├── Dockerfile                   # FastAPI container (AMD64 for GCP Cloud Run)
@@ -450,7 +451,7 @@ real-time PostgreSQL benchmark queries
 Deployed multi-agent system on GCP Cloud Run with FastAPI serving scorecards in
 0.36s, Neon PostgreSQL cloud database, and HuggingFace Spaces dashboard
 
-Built GitHub Actions CI/CD pipeline with 90 unit tests + 85% coverage gate on every
+Built GitHub Actions CI/CD pipeline with 97 unit tests + 85% coverage gate on every
 push, using SQLite in-memory fixtures — zero external dependencies in CI
 ```
 

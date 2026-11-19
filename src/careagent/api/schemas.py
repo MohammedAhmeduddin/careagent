@@ -21,10 +21,6 @@ class AnalyzeRequest(BaseModel):
         description="10-digit National Provider Identifier",
         examples=["1234567890"],
     )
-    force_rerun: bool = Field(
-        default=False,
-        description="Re-run pipeline even if provider was scored recently",
-    )
 
 
 # ── Response ───────────────────────────────────────────────────────────────────
@@ -55,6 +51,10 @@ class ScorecardResponse(BaseModel):
     performance_narrative: Optional[str]
     narrative_faithfulness: Optional[float]
     narrative_relevancy: Optional[float]
+    narrative_source: Optional[str] = Field(
+        default=None,
+        description='"llm" if the model wrote the narrative, "template" if it fell back',
+    )
 
     # Recommendation
     network_recommendation: Optional[str]

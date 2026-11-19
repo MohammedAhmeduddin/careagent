@@ -56,6 +56,8 @@ class AgentState(TypedDict):
     performance_narrative: Optional[str]  # GPT-generated summary
     narrative_faithfulness: Optional[float]  # RAGAS score
     narrative_relevancy: Optional[float]     # RAGAS score
+    narrative_source: Optional[str]       # "llm" or "template" (fallback)
+    llm_tokens_used: Optional[int]        # tokens billed for the narrative
     summarizer_complete: Optional[bool]
 
     # ── Reporter Agent output ──────────────────────────────────────────────────
@@ -94,6 +96,8 @@ def initial_state(npi: str, run_id: str) -> AgentState:
         performance_narrative=None,
         narrative_faithfulness=None,
         narrative_relevancy=None,
+        narrative_source=None,
+        llm_tokens_used=0,
         summarizer_complete=None,
         network_recommendation=None,
         scorecard=None,

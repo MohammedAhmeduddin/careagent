@@ -173,6 +173,11 @@ if run_btn and npi:
                     # Narrative
                     st.subheader("Performance Narrative")
                     st.info(data.get("performance_narrative", "No narrative generated."))
+                    if data.get("narrative_source") == "template":
+                        st.caption(
+                            "Written from a template: the language model was "
+                            "unavailable for this run."
+                        )
 
                     st.divider()
 
