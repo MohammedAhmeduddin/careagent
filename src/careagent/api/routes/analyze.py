@@ -14,6 +14,7 @@ from loguru import logger
 from careagent.api.schemas import AnalyzeRequest, ScorecardResponse, ErrorResponse
 from careagent.graph.state import initial_state
 from careagent.graph.workflow import careagent_graph
+from careagent.scoring.peer import DISCLAIMER
 from careagent.db.session import get_db
 from careagent.db.queries import (
     get_provider_by_npi,
@@ -34,14 +35,13 @@ def analyze_provider(request: AnalyzeRequest) -> ScorecardResponse:
     """
     Run the full CareAgent pipeline for a provider NPI.
 
-    Pipeline steps (supervisor decides which run):
-    1. Data Cleaner — validates and imputes missing fields
-    2. Statistical Agent — quality score vs national benchmarks
-    3. Anomaly Agent — Isolation Forest outlier detection
-    4. Summarizer — LLM performance narrative (template fallback)
-    5. Reporter — final scorecard + network recommendation
-
-    Returns the complete scorecard in under 10 seconds (warm instance).
+    Pipeline steps (the supervisor decides which run):
+    1. Data Validator: required fields present and valid (never imputes)
+    2. Statistical: risk-adjusted comparison with same-specialty peers
+    3. Anomaly: outlier rule + Isolation Forest rank, with reasons
+       (skipped when the specialty has too few peers or data is missing)
+    4. Summarizer: LLM narrative with a number check (template fallback)
+    5. Reporter: final scorecard with disclaimer
     """
     npi    = request.npi
     run_id = str(uuid.uuid4())
@@ -99,37 +99,35 @@ def analyze_provider(request: AnalyzeRequest) -> ScorecardResponse:
             duration_seconds=duration,
             tokens_used=final_state.get("llm_tokens_used") or 0,
             llm_calls=1 if final_state.get("narrative_source") == "llm" else 0,
-            recommendation=final_state.get("network_recommendation", "review"),
+            final_status=final_state.get("billing_pattern_status"),
         )
-        provider = get_provider_by_npi(db, npi)
 
     logger.info(
         f"[API] Pipeline complete — NPI={npi} "
         f"duration={duration}s "
-        f"recommendation={final_state.get('network_recommendation')}"
+        f"status={final_state.get('billing_pattern_status')}"
     )
 
     # ── Build response ─────────────────────────────────────────────────────────
     return ScorecardResponse(
         npi=npi,
         run_id=run_id,
-        provider_name=f"{provider.last_name_or_org}, {provider.first_name or ''}".strip(", "),
-        provider_type=provider.provider_type,
-        state=provider.state,
-        quality_score=final_state.get("quality_score"),
-        quality_percentile=final_state.get("quality_percentile"),
-        cost_efficiency_ratio=final_state.get("cost_efficiency_ratio"),
-        volume_percentile=final_state.get("volume_percentile"),
-        is_anomaly=final_state.get("is_anomaly"),
-        anomaly_score=final_state.get("anomaly_score"),
-        anomaly_reason=final_state.get("anomaly_reason"),
-        data_quality_score=final_state.get("data_quality_score"),
-        fields_imputed=final_state.get("fields_imputed"),
+        provider_type=final_state.get("provider_type"),
+        city=final_state.get("city"),
+        state=final_state.get("state"),
+        billing_pattern_status=final_state.get("billing_pattern_status"),
+        peer_group_size=final_state.get("peer_group_size"),
+        provider_metrics=final_state.get("provider_metrics"),
+        peer_benchmarks=final_state.get("peer_benchmarks"),
+        peer_comparison=final_state.get("peer_comparison"),
+        is_outlier=final_state.get("is_outlier"),
+        outlier_reasons=final_state.get("outlier_reasons") or [],
+        isolation_forest_percentile=final_state.get("isolation_forest_percentile"),
+        data_completeness=final_state.get("data_completeness"),
+        missing_fields=final_state.get("missing_fields") or [],
         performance_narrative=final_state.get("performance_narrative"),
-        narrative_faithfulness=final_state.get("narrative_faithfulness"),
-        narrative_relevancy=final_state.get("narrative_relevancy"),
         narrative_source=final_state.get("narrative_source"),
-        network_recommendation=final_state.get("network_recommendation"),
+        disclaimer=DISCLAIMER,
         scorecard_version=final_state.get("scorecard_version"),
         agents_executed=final_state.get("agents_executed", []),
         agents_skipped=final_state.get("agents_skipped", []),
