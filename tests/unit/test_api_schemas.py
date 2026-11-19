@@ -29,13 +29,12 @@ class TestAnalyzeRequest:
         with pytest.raises(ValidationError):
             AnalyzeRequest(npi="123456789A")
 
-    def test_force_rerun_defaults_to_false(self):
-        req = AnalyzeRequest(npi="1234567890")
-        assert req.force_rerun is False
-
-    def test_force_rerun_can_be_set_true(self):
+    def test_old_force_rerun_field_still_accepted(self):
+        # force_rerun was removed (it was never used); old clients that still
+        # send it must keep working, so unknown fields are ignored.
         req = AnalyzeRequest(npi="1234567890", force_rerun=True)
-        assert req.force_rerun is True
+        assert req.npi == "1234567890"
+        assert not hasattr(req, "force_rerun")
 
 
 class TestHealthResponse:

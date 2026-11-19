@@ -37,7 +37,13 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: str = Field(default="")
-    openai_model: str = Field(default="gpt-4o-mini")
+    # gpt-4o-mini shuts down on 2027-01-14; OpenAI recommends gpt-6-luna.
+    openai_model: str = Field(default="gpt-6-luna")
+    openai_temperature: float = Field(default=0.1)
+    # Reasoning models count reasoning tokens against this limit.
+    openai_max_completion_tokens: int = Field(default=4000)
+    openai_timeout_seconds: float = Field(default=60.0)
+    openai_max_retries: int = Field(default=1)
 
     # LangSmith
     langchain_tracing_v2: bool = Field(default=False)

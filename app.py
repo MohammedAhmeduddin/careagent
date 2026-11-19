@@ -69,7 +69,7 @@ if run_btn and npi:
             "data_cleaner": ("🧹", "Data Cleaner",    "Validates and imputes missing fields"),
             "statistical":  ("📊", "Statistical",     "Quality score vs national benchmarks"),
             "anomaly":      ("🔍", "Anomaly Detector","Isolation Forest cost/quality analysis"),
-            "summarizer":   ("✍️",  "Summarizer",      "GPT-4o-mini performance narrative"),
+            "summarizer":   ("✍️",  "Summarizer",      "LLM performance narrative"),
             "reporter":     ("📋", "Reporter",        "Assembles final scorecard"),
         }
 
@@ -173,6 +173,11 @@ if run_btn and npi:
                     # Narrative
                     st.subheader("Performance Narrative")
                     st.info(data.get("performance_narrative", "No narrative generated."))
+                    if data.get("narrative_source") == "template":
+                        st.caption(
+                            "Written from a template: the language model was "
+                            "unavailable for this run."
+                        )
 
                     st.divider()
 

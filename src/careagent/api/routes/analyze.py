@@ -38,7 +38,7 @@ def analyze_provider(request: AnalyzeRequest) -> ScorecardResponse:
     1. Data Cleaner — validates and imputes missing fields
     2. Statistical Agent — quality score vs national benchmarks
     3. Anomaly Agent — Isolation Forest outlier detection
-    4. Summarizer — GPT-4o-mini performance narrative
+    4. Summarizer — LLM performance narrative (template fallback)
     5. Reporter — final scorecard + network recommendation
 
     Returns the complete scorecard in under 10 seconds (warm instance).
@@ -65,18 +65,29 @@ def analyze_provider(request: AnalyzeRequest) -> ScorecardResponse:
     try:
         final_state = careagent_graph.invoke(state)
     except Exception as e:
-        logger.error(f"[API] Pipeline failed for NPI={npi}: {e}")
+        # Full details go to the logs and the agent_runs table, never to the
+        # caller: exception text can contain hostnames or connection details.
+        logger.exception(f"[API] Pipeline failed for NPI={npi} run_id={run_id}")
         with get_db() as db:
             fail_agent_run(db, run_id=run_id, error_message=str(e))
-        raise HTTPException(status_code=500, detail=f"Pipeline error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pipeline failed (run_id={run_id}). Details are in the server logs.",
+        )
 
     duration = round(time.perf_counter() - start, 3)
 
     # ── Check for pipeline-level errors ───────────────────────────────────────
     if final_state.get("error"):
+        logger.error(
+            f"[API] Pipeline error for NPI={npi} run_id={run_id}: {final_state['error']}"
+        )
         with get_db() as db:
             fail_agent_run(db, run_id=run_id, error_message=final_state["error"])
-        raise HTTPException(status_code=500, detail=final_state["error"])
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pipeline failed (run_id={run_id}). Details are in the server logs.",
+        )
 
     # ── Log the completed run ──────────────────────────────────────────────────
     with get_db() as db:
@@ -86,8 +97,8 @@ def analyze_provider(request: AnalyzeRequest) -> ScorecardResponse:
             agents_executed=final_state.get("agents_executed", []),
             agents_skipped=final_state.get("agents_skipped", []),
             duration_seconds=duration,
-            tokens_used=0,
-            llm_calls=1 if final_state.get("performance_narrative") else 0,
+            tokens_used=final_state.get("llm_tokens_used") or 0,
+            llm_calls=1 if final_state.get("narrative_source") == "llm" else 0,
             recommendation=final_state.get("network_recommendation", "review"),
         )
         provider = get_provider_by_npi(db, npi)
@@ -117,6 +128,7 @@ def analyze_provider(request: AnalyzeRequest) -> ScorecardResponse:
         performance_narrative=final_state.get("performance_narrative"),
         narrative_faithfulness=final_state.get("narrative_faithfulness"),
         narrative_relevancy=final_state.get("narrative_relevancy"),
+        narrative_source=final_state.get("narrative_source"),
         network_recommendation=final_state.get("network_recommendation"),
         scorecard_version=final_state.get("scorecard_version"),
         agents_executed=final_state.get("agents_executed", []),
