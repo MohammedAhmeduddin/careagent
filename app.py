@@ -69,7 +69,7 @@ if run_btn and npi:
             "data_cleaner": ("🧹", "Data Cleaner",    "Validates and imputes missing fields"),
             "statistical":  ("📊", "Statistical",     "Quality score vs national benchmarks"),
             "anomaly":      ("🔍", "Anomaly Detector","Isolation Forest cost/quality analysis"),
-            "summarizer":   ("✍️",  "Summarizer",      "GPT-4o-mini performance narrative"),
+            "summarizer":   ("✍️",  "Summarizer",      "LLM performance narrative"),
             "reporter":     ("📋", "Reporter",        "Assembles final scorecard"),
         }
 

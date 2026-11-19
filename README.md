@@ -134,7 +134,7 @@ Composite quality score (0–100) benchmarked against specialty national average
 - Confirmed 300 / 9,985 providers flagged — exactly 3.0% in production
 
 ### 4 · Provider Performance Narrative Agent
-- OpenAI model set by `OPENAI_MODEL` (default GPT-4o-mini), with **tool calling** for structured JSON output
+- OpenAI model set by `OPENAI_MODEL` (default `gpt-6-luna`; `gpt-4o-mini` shuts down 2027-01-14), with **tool calling** for structured JSON output
 - 20-second timeout and one retry; models that reject a custom temperature are retried without it
 - Temperature 0.1 for factual consistency
 - Data-grounded prompt — no hallucination beyond source fields
@@ -473,5 +473,5 @@ Provider data structure modelled on [CMS Medicare Provider Utilization and Payme
 ---
 
 <div align="center">
-<sub>Built with LangGraph · FastAPI · PostgreSQL · scikit-learn · GPT-4o-mini · GCP Cloud Run</sub>
+<sub>Built with LangGraph · FastAPI · PostgreSQL · scikit-learn · OpenAI · GCP Cloud Run</sub>
 </div>

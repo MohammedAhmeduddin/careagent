@@ -38,7 +38,7 @@ def analyze_provider(request: AnalyzeRequest) -> ScorecardResponse:
     1. Data Cleaner — validates and imputes missing fields
     2. Statistical Agent — quality score vs national benchmarks
     3. Anomaly Agent — Isolation Forest outlier detection
-    4. Summarizer — GPT-4o-mini performance narrative
+    4. Summarizer — LLM performance narrative (template fallback)
     5. Reporter — final scorecard + network recommendation
 
     Returns the complete scorecard in under 10 seconds (warm instance).

@@ -1,7 +1,7 @@
 """
 careagent.agents.summarizer
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Summarizer Agent — generates provider performance narrative via GPT-4o-mini.
+Summarizer Agent — generates the provider performance narrative with the configured OpenAI model.
 
 Uses structured JSON output (function calling) to ensure the narrative
 always returns in a predictable schema. Falls back to a template-based
