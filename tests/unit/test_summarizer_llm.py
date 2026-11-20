@@ -100,6 +100,87 @@ class TestLLMPath:
         assert out["narrative_source"] == "template"
 
 
+def bad_request(message, param=None):
+    resp = httpx.Response(400, request=httpx.Request("POST", "https://x"))
+    body = {"message": message, "type": "invalid_request_error", "param": param}
+    return openai.BadRequestError(message, response=resp, body=body)
+
+
+GPT6_TOOLS_ERROR = (
+    "Function tools with reasoning_effort are not supported for gpt-6-luna in "
+    "/v1/chat/completions. To use function tools, use /v1/responses or set "
+    "reasoning_effort to 'none'."
+)
+
+
+class TestReasoningEffort:
+    def test_sends_reasoning_effort_none_by_default(self):
+        client = MagicMock()
+        client.chat.completions.create.return_value = completion("x")
+        with patch.object(summarizer, "OpenAI", return_value=client):
+            summarizer._call_gpt("p")
+        assert client.chat.completions.create.call_args.kwargs["reasoning_effort"] == "none"
+
+    def test_empty_setting_omits_parameter(self):
+        client = MagicMock()
+        client.chat.completions.create.return_value = completion("x")
+        with patch.object(summarizer.settings, "openai_reasoning_effort", ""), \
+             patch.object(summarizer, "OpenAI", return_value=client):
+            summarizer._call_gpt("p")
+        assert "reasoning_effort" not in client.chat.completions.create.call_args.kwargs
+
+    def test_model_rejecting_reasoning_effort_is_retried_without_it(self):
+        client = MagicMock()
+        client.chat.completions.create.side_effect = [
+            bad_request("Unrecognized request argument: reasoning_effort", "reasoning_effort"),
+            completion("ok"),
+        ]
+        with patch.object(summarizer, "OpenAI", return_value=client):
+            args, _ = summarizer._call_gpt("p")
+        assert json.loads(args)["narrative"] == "ok"
+        assert "reasoning_effort" not in client.chat.completions.create.call_args_list[1].kwargs
+
+    def test_both_optional_params_can_be_dropped_then_gives_up(self):
+        client = MagicMock()
+        client.chat.completions.create.side_effect = [
+            bad_request("Unsupported value: 'temperature'", "temperature"),
+            bad_request("reasoning_effort not supported", "reasoning_effort"),
+            completion("ok"),
+        ]
+        with patch.object(summarizer, "OpenAI", return_value=client):
+            assert json.loads(summarizer._call_gpt("p")[0])["narrative"] == "ok"
+        last = client.chat.completions.create.call_args_list[2].kwargs
+        assert "temperature" not in last and "reasoning_effort" not in last
+
+    def test_same_param_rejected_twice_is_raised_not_looped(self):
+        client = MagicMock()
+        err = bad_request("Unsupported value: 'temperature'", "temperature")
+        client.chat.completions.create.side_effect = [err, err]
+        with patch.object(summarizer, "OpenAI", return_value=client), \
+             pytest.raises(openai.BadRequestError):
+            summarizer._call_gpt("p")
+        assert client.chat.completions.create.call_count == 2
+
+    def test_gpt6_luna_tools_error_mentions_param_not_retried_blindly(self):
+        """The real error came back because reasoning_effort was missing; with the
+        default "none" it is sent, and if the API still names it, it is dropped once."""
+        client = MagicMock()
+        client.chat.completions.create.side_effect = [
+            bad_request(GPT6_TOOLS_ERROR, "reasoning_effort"), completion("ok")]
+        with patch.object(summarizer, "OpenAI", return_value=client):
+            summarizer._call_gpt("p")
+        assert client.chat.completions.create.call_count == 2
+
+    def test_failure_log_includes_openai_message(self, state, with_key):
+        with patch.object(summarizer, "_call_gpt",
+                          side_effect=bad_request(GPT6_TOOLS_ERROR, "reasoning_effort")), \
+             patch.object(summarizer, "logger") as log:
+            out = summarizer.summarizer_agent(state)
+        assert out["narrative_source"] == "template"
+        message = log.warning.call_args.args[0]
+        assert "BadRequestError" in message and "reasoning_effort" in message
+
+
 class TestCallGpt:
     def test_uses_tools_timeout_and_completion_tokens(self):
         client = MagicMock()
