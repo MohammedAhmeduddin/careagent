@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     # gpt-4o-mini shuts down on 2027-01-14; OpenAI recommends gpt-6-luna.
     openai_model: str = Field(default="gpt-6-luna")
     openai_temperature: float = Field(default=0.1)
+    # gpt-6-luna needs "none" to use function tools on Chat Completions.
+    # Set to "" for models that don't accept the parameter.
+    openai_reasoning_effort: str = Field(default="none")
     # Reasoning models count reasoning tokens against this limit.
     openai_max_completion_tokens: int = Field(default=4000)
     openai_timeout_seconds: float = Field(default=60.0)

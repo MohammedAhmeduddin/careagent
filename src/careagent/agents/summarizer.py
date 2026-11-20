@@ -139,7 +139,12 @@ def _template_narrative(state: AgentState) -> str:
     return text
 
 
-def _create_completion(client: OpenAI, prompt: str, with_temperature: bool):
+# Optional request parameters some models reject. If the API names one of
+# these in a 400 error, the call is retried once more without it.
+OPTIONAL_PARAMS = ("temperature", "reasoning_effort")
+
+
+def _create_completion(client: OpenAI, prompt: str, drop: frozenset = frozenset()):
     kwargs = dict(
         model=settings.openai_model,
         messages=[
@@ -161,9 +166,25 @@ def _create_completion(client: OpenAI, prompt: str, with_temperature: bool):
         },
         max_completion_tokens=settings.openai_max_completion_tokens,
     )
-    if with_temperature:
+    if "temperature" not in drop:
         kwargs["temperature"] = settings.openai_temperature  # low = factual
+    # gpt-6-luna only allows function tools on Chat Completions with
+    # reasoning_effort="none"; set OPENAI_REASONING_EFFORT="" to omit it.
+    if settings.openai_reasoning_effort and "reasoning_effort" not in drop:
+        kwargs["reasoning_effort"] = settings.openai_reasoning_effort
     return client.chat.completions.create(**kwargs)
+
+
+def _rejected_param(error: BadRequestError, already_dropped: frozenset) -> str | None:
+    """The optional parameter a 400 error complains about, if any."""
+    named = (getattr(error, "param", None) or "").lower()
+    text = str(error).lower()
+    for param in OPTIONAL_PARAMS:
+        if param in already_dropped:
+            continue
+        if named == param or param in text:
+            return param
+    return None
 
 
 def _call_gpt(prompt: str) -> tuple[str, int]:
@@ -171,21 +192,26 @@ def _call_gpt(prompt: str) -> tuple[str, int]:
     Call the configured OpenAI model with structured (tool) output.
     Returns (narrative_json_str, tokens_used). Raises on failure.
 
-    Some newer models reject a custom temperature; in that case the call is
-    retried once without it instead of failing.
+    If the model rejects an optional parameter (temperature or
+    reasoning_effort), the call is retried without it, at most once per
+    parameter. Any other error is raised.
     """
     client = OpenAI(
         api_key=settings.openai_api_key,
         timeout=settings.openai_timeout_seconds,
         max_retries=settings.openai_max_retries,
     )
-    try:
-        response = _create_completion(client, prompt, with_temperature=True)
-    except BadRequestError as e:
-        if "temperature" not in str(e).lower():
-            raise
-        logger.info("[Summarizer] Model rejects temperature; retrying without it")
-        response = _create_completion(client, prompt, with_temperature=False)
+    drop: frozenset = frozenset()
+    while True:
+        try:
+            response = _create_completion(client, prompt, drop)
+            break
+        except BadRequestError as e:
+            param = _rejected_param(e, drop)
+            if param is None:
+                raise
+            logger.info(f"[Summarizer] Model rejects {param}; retrying without it")
+            drop = drop | {param}
 
     tokens = response.usage.total_tokens if response.usage else 0
     args = response.choices[0].message.tool_calls[0].function.arguments
@@ -209,7 +235,12 @@ def summarizer_agent(state: AgentState) -> AgentState:
             else:
                 logger.warning(f"[Summarizer] NPI={npi}: narrative failed the grounding check")
         except Exception as e:  # any failure -> documented template fallback
-            logger.warning(f"[Summarizer] LLM call failed ({type(e).__name__}) for NPI={npi}")
+            # OpenAI error text names the problem (model, parameter, quota) and
+            # never contains the API key, so it is logged for diagnosis.
+            logger.warning(
+                f"[Summarizer] LLM call failed for NPI={npi}: "
+                f"{type(e).__name__}: {str(e)[:300]}"
+            )
             tokens_used = 0
 
     if narrative is None:

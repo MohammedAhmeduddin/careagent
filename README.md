@@ -3,7 +3,7 @@
 <img src="https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white"/>
 <img src="https://img.shields.io/badge/LangGraph-Multi--Agent-7C3AED?style=flat-square"/>
 <img src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white"/>
-<img src="https://img.shields.io/badge/Tests-113%20passing-22C55E?style=flat-square"/>
+<img src="https://img.shields.io/badge/Tests-121%20passing-22C55E?style=flat-square"/>
 <img src="https://img.shields.io/badge/Coverage-98%25%20(whole%20package)-22C55E?style=flat-square"/>
 <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white"/>
 <img src="https://img.shields.io/badge/GCP-Cloud%20Run-4285F4?style=flat-square&logo=googlecloud&logoColor=white"/>
@@ -39,7 +39,7 @@
 | 🌲 **Independent check** | A per-specialty Isolation Forest ranks flagged providers at a median **96.4th** percentile of unusualness vs **48.2** for typical providers. Two different methods agree |
 | ⚡ **Fast** | Scoring runs once at load (39,694 providers scored and written in ~30 s); the API reads stored results, giving **p50 26 ms / p95 45 ms** for the full 5-agent pipeline (200 random real providers, local Postgres) |
 | 🧠 **Grounded LLM** | The narrative model (gpt-6-luna) must use only numbers it was given: a number check rejects any narrative containing an unsupported figure and falls back to a deterministic template |
-| ✅ **Tested** | **113 tests** (101 unit + 12 PostgreSQL integration), **98.6%** coverage of the *whole* package; CI runs the integration tests against a Postgres service container |
+| ✅ **Tested** | **121 tests** (109 unit + 12 PostgreSQL integration), **98.6%** coverage of the *whole* package; CI runs the integration tests against a Postgres service container |
 
 ---
 
@@ -165,7 +165,7 @@ src/careagent/
 scripts/download_cms_providers.py   # CMS API → CSV (paginated, retries)
 scripts/load_cms_providers.py       # CSV → score → Postgres
 app.py                              # Streamlit dashboard
-tests/unit · tests/integration      # 101 + 12 tests
+tests/unit · tests/integration      # 109 + 12 tests
 ```
 
 ## Limitations
