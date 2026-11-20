@@ -35,10 +35,19 @@ SessionLocal = sessionmaker(
 def create_tables() -> None:
     logger.info("Creating database tables...")
     Base.metadata.create_all(bind=engine)
+    # create_all never alters existing tables; add columns introduced later
+    with engine.begin() as conn:
+        for statement in MIGRATIONS:
+            conn.execute(text(statement))
     logger.info("Tables ready.")
 
 
 LEGACY_TABLES = ["provider_services"]
+
+# Idempotent column additions for databases created by an earlier version
+MIGRATIONS = [
+    "ALTER TABLE providers ADD COLUMN IF NOT EXISTS narrative_fingerprint VARCHAR(64)",
+]
 
 
 def reset_schema() -> None:

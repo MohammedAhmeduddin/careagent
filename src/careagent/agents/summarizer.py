@@ -10,14 +10,16 @@ number is rejected and a deterministic template is used instead. The
 template is also used when no API key is set or the call fails.
 """
 
+import hashlib
 import json
 import re
+import time
 
 from loguru import logger
 from openai import BadRequestError, OpenAI
 
 from careagent.config import get_settings
-from careagent.db.queries import update_provider_narrative
+from careagent.db.queries import get_cached_narrative, update_provider_narrative
 from careagent.db.session import get_db
 from careagent.graph.state import AgentState
 from careagent.scoring.peer import (
@@ -45,6 +47,9 @@ NARRATIVE_FUNCTION = {
     },
 }
 NARRATIVE_TOOL = {"type": "function", "function": NARRATIVE_FUNCTION}
+
+# Bump when the prompt or the narrative rules change: invalidates cached narratives
+PROMPT_VERSION = "2"
 
 _NUMBER = re.compile(r"\d[\d,]*\.?\d*")
 
@@ -116,6 +121,12 @@ def numbers_grounded(narrative: str, facts: list[str]) -> bool:
     return True
 
 
+def narrative_fingerprint(state: AgentState) -> str:
+    """Identifies the exact inputs of an LLM narrative: model, prompt version, facts."""
+    payload = "\n".join([settings.openai_model, PROMPT_VERSION, *_facts(state)])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _template_narrative(state: AgentState) -> str:
     specialty = state.get("provider_type") or "Unknown specialty"
     status = state.get("billing_pattern_status")
@@ -151,7 +162,9 @@ def _template_narrative(state: AgentState) -> str:
 OPTIONAL_PARAMS = ("temperature", "reasoning_effort")
 
 
-def _create_completion(client: OpenAI, prompt: str, drop: frozenset = frozenset()):
+def _create_completion(
+    client: OpenAI, prompt: str, drop: frozenset = frozenset(), timeout: float | None = None,
+):
     kwargs = dict(
         model=settings.openai_model,
         messages=[
@@ -173,6 +186,8 @@ def _create_completion(client: OpenAI, prompt: str, drop: frozenset = frozenset(
         },
         max_completion_tokens=settings.openai_max_completion_tokens,
     )
+    if timeout is not None:
+        kwargs["timeout"] = timeout
     if "temperature" not in drop:
         kwargs["temperature"] = settings.openai_temperature  # low = factual
     # gpt-6-luna only allows function tools on Chat Completions with
@@ -201,7 +216,8 @@ def _call_gpt(prompt: str) -> tuple[str, int]:
 
     If the model rejects an optional parameter (temperature or
     reasoning_effort), the call is retried without it, at most once per
-    parameter. Any other error is raised.
+    parameter. Any other error is raised. All attempts together are capped by
+    settings.openai_total_budget_seconds (TimeoutError when used up).
     """
     client = OpenAI(
         api_key=settings.openai_api_key,
@@ -209,9 +225,17 @@ def _call_gpt(prompt: str) -> tuple[str, int]:
         max_retries=settings.openai_max_retries,
     )
     drop: frozenset = frozenset()
+    deadline = time.monotonic() + settings.openai_total_budget_seconds
     while True:
+        remaining = deadline - time.monotonic()
+        if remaining < 1.0:
+            raise TimeoutError(
+                f"LLM time budget of {settings.openai_total_budget_seconds:.0f}s used up"
+            )
         try:
-            response = _create_completion(client, prompt, drop)
+            response = _create_completion(
+                client, prompt, drop, timeout=min(settings.openai_timeout_seconds, remaining)
+            )
             break
         except BadRequestError as e:
             param = _rejected_param(e, drop)
@@ -226,14 +250,34 @@ def _call_gpt(prompt: str) -> tuple[str, int]:
 
 
 def summarizer_agent(state: AgentState) -> AgentState:
-    """Write the narrative. Sets narrative_source to "llm" or "template"."""
+    """Write the narrative. Sets narrative_source to "llm" or "template".
+
+    An LLM narrative is stored with a fingerprint of its inputs and reused
+    while they are unchanged (narrative_cached=True, no tokens spent), which
+    bounds cost and latency for repeat requests.
+    """
     npi = state["npi"]
-    narrative, tokens_used, source = None, 0, "template"
+    narrative, tokens_used, source, fingerprint, cached = None, 0, "template", None, False
     comparable = state.get("billing_pattern_status") not in (
         STATUS_INSUFFICIENT_PEERS, STATUS_INSUFFICIENT_DATA,
     )
+    llm_enabled = bool(settings.openai_api_key) and settings.openai_api_key != "sk-placeholder"
 
-    if comparable and settings.openai_api_key and settings.openai_api_key != "sk-placeholder":
+    if comparable and llm_enabled:
+        fingerprint = narrative_fingerprint(state)
+        with get_db() as db:
+            stored = get_cached_narrative(db, npi, fingerprint)
+        if stored:
+            logger.info(f"[Summarizer] NPI={npi} reusing stored LLM narrative")
+            return {
+                **state,
+                "performance_narrative": stored,
+                "narrative_source": "llm",
+                "narrative_cached": True,
+                "llm_tokens_used": 0,
+                "summarizer_complete": True,
+                "agents_executed": state.get("agents_executed", []) + ["summarizer"],
+            }
         try:
             args, tokens_used = _call_gpt(_build_prompt(state))
             candidate = (json.loads(args).get("narrative") or "").strip()
@@ -255,13 +299,17 @@ def summarizer_agent(state: AgentState) -> AgentState:
     narrative = f"{narrative} {DISCLAIMER}"
 
     with get_db() as db:
-        update_provider_narrative(db, npi, narrative=narrative, source=source)
+        update_provider_narrative(
+            db, npi, narrative=narrative, source=source,
+            fingerprint=fingerprint if source == "llm" else None,
+        )
 
     logger.info(f"[Summarizer] NPI={npi} source={source}")
     return {
         **state,
         "performance_narrative": narrative,
         "narrative_source": source,
+        "narrative_cached": cached,
         "llm_tokens_used": tokens_used,
         "summarizer_complete": True,
         "agents_executed": state.get("agents_executed", []) + ["summarizer"],

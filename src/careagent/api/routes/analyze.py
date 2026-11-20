@@ -8,9 +8,10 @@ import time
 import uuid
 from datetime import datetime, UTC
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
+from careagent.api.ratelimit import limit_analyze
 from careagent.api.schemas import AnalyzeRequest, ScorecardResponse, ErrorResponse
 from careagent.graph.state import initial_state
 from careagent.graph.workflow import careagent_graph
@@ -29,7 +30,9 @@ router = APIRouter(tags=["analyze"])
 @router.post(
     "/analyze",
     response_model=ScorecardResponse,
-    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    responses={404: {"model": ErrorResponse}, 429: {"model": ErrorResponse},
+               500: {"model": ErrorResponse}},
+    dependencies=[Depends(limit_analyze)],
 )
 def analyze_provider(request: AnalyzeRequest) -> ScorecardResponse:
     """
@@ -98,7 +101,8 @@ def analyze_provider(request: AnalyzeRequest) -> ScorecardResponse:
             agents_skipped=final_state.get("agents_skipped", []),
             duration_seconds=duration,
             tokens_used=final_state.get("llm_tokens_used") or 0,
-            llm_calls=1 if final_state.get("narrative_source") == "llm" else 0,
+            llm_calls=1 if (final_state.get("narrative_source") == "llm"
+                            and not final_state.get("narrative_cached")) else 0,
             final_status=final_state.get("billing_pattern_status"),
         )
 
@@ -127,6 +131,7 @@ def analyze_provider(request: AnalyzeRequest) -> ScorecardResponse:
         missing_fields=final_state.get("missing_fields") or [],
         performance_narrative=final_state.get("performance_narrative"),
         narrative_source=final_state.get("narrative_source"),
+        narrative_cached=bool(final_state.get("narrative_cached")),
         disclaimer=DISCLAIMER,
         scorecard_version=final_state.get("scorecard_version"),
         agents_executed=final_state.get("agents_executed", []),

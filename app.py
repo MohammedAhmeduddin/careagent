@@ -78,6 +78,9 @@ if run:
         except requests.exceptions.RequestException:
             st.error("Cannot reach the API.")
             st.stop()
+    if resp.status_code == 429:
+        st.warning("Too many requests from your connection. Please wait a minute and try again.")
+        st.stop()
     if resp.status_code == 404:
         st.error(f"NPI {npi} is not in the dataset (New Jersey, CMS 2024).")
         st.stop()
@@ -117,8 +120,11 @@ if run:
 
     st.subheader("Summary")
     st.info(data.get("performance_narrative") or "")
-    st.caption(("Written by the language model and number-checked."
-                if data.get("narrative_source") == "llm"
-                else "Written from a template (model unavailable or failed the number check)."))
+    if data.get("narrative_source") == "llm":
+        st.caption("Written by the language model and number-checked"
+                   + (" (reused: same inputs as an earlier run)." if data.get("narrative_cached") else "."))
+    else:
+        st.caption("Written from a template (model unavailable, failed the number check, "
+                   "or nothing to compare).")
     st.caption(f"Run {data['run_id']} · {data['pipeline_duration_seconds']:.3f}s · "
                f"scorecard v{data.get('scorecard_version')}")

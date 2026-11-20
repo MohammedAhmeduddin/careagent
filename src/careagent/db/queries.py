@@ -41,12 +41,26 @@ def update_provider_validation(db: Session, npi: str, notes: str) -> None:
     db.execute(update(Provider).where(Provider.npi == npi).values(validation_notes=notes))
 
 
-def update_provider_narrative(db: Session, npi: str, narrative: str, source: str) -> None:
+def update_provider_narrative(
+    db: Session, npi: str, narrative: str, source: str, fingerprint: Optional[str] = None,
+) -> None:
     db.execute(
         update(Provider).where(Provider.npi == npi).values(
             performance_narrative=narrative, narrative_source=source,
+            narrative_fingerprint=fingerprint,
         )
     )
+
+
+def get_cached_narrative(db: Session, npi: str, fingerprint: str) -> Optional[str]:
+    """A stored LLM narrative, if it was written for exactly these facts."""
+    row = db.execute(
+        select(Provider.performance_narrative)
+        .where(Provider.npi == npi)
+        .where(Provider.narrative_source == "llm")
+        .where(Provider.narrative_fingerprint == fingerprint)
+    ).first()
+    return row[0] if row and row[0] else None
 
 
 def update_provider_report(db: Session, npi: str, scorecard_version: str) -> None:

@@ -3,8 +3,8 @@
 <img src="https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white"/>
 <img src="https://img.shields.io/badge/LangGraph-Multi--Agent-7C3AED?style=flat-square"/>
 <img src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white"/>
-<img src="https://img.shields.io/badge/Tests-134%20passing-22C55E?style=flat-square"/>
-<img src="https://img.shields.io/badge/Coverage-98%25%20(whole%20package)-22C55E?style=flat-square"/>
+<img src="https://img.shields.io/badge/Tests-176%20passing-22C55E?style=flat-square"/>
+<img src="https://img.shields.io/badge/Coverage-98.7%25%20(whole%20package)-22C55E?style=flat-square"/>
 <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white"/>
 <img src="https://img.shields.io/badge/GCP-Cloud%20Run-4285F4?style=flat-square&logo=googlecloud&logoColor=white"/>
 
@@ -39,7 +39,7 @@
 | 🌲 **Independent check** | A per-specialty Isolation Forest ranks flagged providers at a median **96.4th** percentile of unusualness vs **48.2** for typical providers. Two different methods agree |
 | ⚡ **Fast** | Scoring runs once at load (39,694 providers scored and written in ~30 s); the API reads stored results, giving **p50 26 ms / p95 45 ms** for the full 5-agent pipeline (200 random real providers, local Postgres, template narrative). Live on Cloud Run with Neon and the LLM narrative: ~3 s, most of it the model call |
 | 🧠 **Grounded LLM** | The narrative model (gpt-6-luna) must use only numbers it was given: a number check rejects any narrative containing an unsupported figure and falls back to a deterministic template |
-| ✅ **Tested** | **134 tests** (122 unit + 12 PostgreSQL integration), **98.6%** coverage of the *whole* package; CI runs the integration tests against a Postgres service container |
+| ✅ **Tested** | **176 tests** (160 unit + 16 PostgreSQL integration), **98.7%** coverage of the *whole* package; CI runs the integration tests against a Postgres service container |
 
 ---
 
@@ -117,6 +117,7 @@ Two providers can take different paths: an outlier runs all five agents, while a
 | 200 | Scorecard |
 | 404 | NPI not in the dataset |
 | 422 | NPI not exactly 10 digits |
+| 429 | More than 20 `/analyze` requests per minute from one client (`Retry-After` header) |
 | 500 | Pipeline failure. Returns a run ID only: details go to logs and `agent_runs`, never to the caller |
 
 ---
@@ -148,6 +149,9 @@ Any state works: `--state CA` downloads California. Upgrading a database created
 
 - **Score once, read many.** Percentiles and outlier thresholds only mean something against the whole peer group, so they are computed in one batch at load time. Each request is a few primary-key reads, with no model refit per request.
 - **Config.** `DATABASE_URL` (one secret, e.g. from GCP Secret Manager) or `POSTGRES_*` + `POSTGRES_SSLMODE`. `postgres://` URLs are normalized to the psycopg2 driver.
+- **LLM cost and latency control.** A model-written narrative is stored with a SHA-256 fingerprint of its inputs (model, prompt version, facts) and reused while they are unchanged: repeat requests spend no tokens (`narrative_cached: true`). All LLM attempts share a 45 s budget (20 s per attempt, no blind SDK retries), well inside Cloud Run's 120 s limit, so a slow model falls back to the template instead of failing the request.
+- **Rate limiting.** `/analyze` allows 20 requests per minute per client IP (sliding window, real client taken from the last `X-Forwarded-For` hop so it can't be spoofed); blocked requests never reach the pipeline.
+- **Loader checks.** Duplicate or malformed NPIs stop the load with a clear message before any data is touched.
 - **Safety rails.** Integration tests run only with `RUN_INTEGRATION=1` *and* a localhost database, so a test run can never wipe the production database. API errors never echo exception text.
 - **CI.** GitHub Actions on every push and PR: all tests against Postgres 16 with an 85% whole-package coverage gate, plus a blocking `ruff` lint (version pinned).
 
@@ -165,7 +169,7 @@ src/careagent/
 scripts/download_cms_providers.py   # CMS API → CSV (paginated, retries)
 scripts/load_cms_providers.py       # CSV → score → Postgres
 app.py                              # Streamlit dashboard
-tests/unit · tests/integration      # 122 + 12 tests
+tests/unit · tests/integration      # 160 + 16 tests
 ```
 
 ## Limitations

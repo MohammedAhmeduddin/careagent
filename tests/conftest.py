@@ -60,6 +60,15 @@ def make_cms_frame(seed: int = 0) -> pd.DataFrame:
     return df
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """Each test starts with an empty /analyze rate-limit window."""
+    from careagent.api.ratelimit import analyze_limiter
+    analyze_limiter.reset()
+    yield
+    analyze_limiter.reset()
+
+
 @pytest.fixture
 def cms_frame() -> pd.DataFrame:
     return make_cms_frame()
