@@ -133,3 +133,57 @@ class TestApi:
         examples = client.get("/").json()["example_npis"]
         assert examples["outlier"] in (OUTLIER_COST_NPI, "1000000002")
         assert examples["insufficient_peers"].startswith("3")
+
+
+class TestEdgeCasesOnPostgres:
+    def test_create_tables_is_idempotent_and_adds_missing_column(self):
+        from sqlalchemy import text
+
+        from careagent.db.session import create_tables, engine
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE providers DROP COLUMN narrative_fingerprint"))
+        create_tables()
+        create_tables()
+        with engine.connect() as conn:
+            cols = {r[0] for r in conn.execute(text(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='providers'"))}
+        assert "narrative_fingerprint" in cols
+
+    def test_llm_narrative_is_cached_across_runs(self):
+        import json
+        from unittest.mock import patch
+
+        from careagent.agents import summarizer
+        good = "Cost per beneficiary is far above the Cardiology median."
+        with patch.object(summarizer.settings, "openai_api_key", "sk-test"), \
+             patch.object(summarizer, "_call_gpt",
+                          return_value=(json.dumps({"narrative": good}), 42)) as call:
+            first = run(OUTLIER_COST_NPI)
+            second = run(OUTLIER_COST_NPI)
+        assert call.call_count == 1
+        assert first["narrative_source"] == "llm" and first["narrative_cached"] is False
+        assert second["narrative_cached"] is True and second["llm_tokens_used"] == 0
+        assert second["performance_narrative"] == first["performance_narrative"]
+
+    def test_changed_model_invalidates_cache(self):
+        import json
+        from unittest.mock import patch
+
+        from careagent.agents import summarizer
+        with patch.object(summarizer.settings, "openai_api_key", "sk-test"), \
+             patch.object(summarizer, "_call_gpt",
+                          return_value=(json.dumps({"narrative": "Above the median."}), 5)) as call:
+            run(TYPICAL_NPI)
+            with patch.object(summarizer.settings, "openai_model", "another-model"):
+                out = run(TYPICAL_NPI)
+        assert call.call_count == 2 and out["narrative_cached"] is False
+
+    def test_loader_rejects_duplicates_before_touching_data(self):
+        import pandas as pd
+        frame = make_cms_frame()
+        bad = pd.concat([frame, frame.iloc[[0]]], ignore_index=True)
+        with pytest.raises(ValueError, match="more than once"):
+            with get_db() as db:
+                load_dataframe(db, bad, year=2024)
+        with SessionLocal() as db:
+            assert len(db.scalars(select(Provider.npi)).all()) == 105  # untouched

@@ -46,6 +46,7 @@ class AgentState(TypedDict):
     # ── Summarizer Agent ───────────────────────────────────────────────────────
     performance_narrative: Optional[str]
     narrative_source: Optional[str]   # "llm" or "template"
+    narrative_cached: Optional[bool]  # True if an unchanged LLM narrative was reused
     llm_tokens_used: Optional[int]
     summarizer_complete: Optional[bool]
 
@@ -83,6 +84,7 @@ def initial_state(npi: str, run_id: str) -> AgentState:
         anomaly_complete=None,
         performance_narrative=None,
         narrative_source=None,
+        narrative_cached=False,
         llm_tokens_used=0,
         summarizer_complete=None,
         scorecard=None,

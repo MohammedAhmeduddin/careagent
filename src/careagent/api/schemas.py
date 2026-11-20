@@ -58,6 +58,8 @@ class ScorecardResponse(BaseModel):
     performance_narrative: Optional[str]
     narrative_source: Optional[str] = Field(
         None, description='"llm" if the model wrote it (and it passed the number check), else "template"')
+    narrative_cached: bool = Field(
+        False, description="True if a stored LLM narrative for identical inputs was reused")
     disclaimer: str
 
     scorecard_version: Optional[str]

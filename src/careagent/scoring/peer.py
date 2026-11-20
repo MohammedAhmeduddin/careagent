@@ -114,6 +114,21 @@ RAW_METRIC = {
 }
 
 
+def _check_npis(npis: pd.Series) -> None:
+    """Fail loudly on malformed or duplicate NPIs instead of at the database."""
+    malformed = ~npis.str.fullmatch(r"\d{10}").fillna(False).astype(bool)
+    if malformed.any():
+        examples = ", ".join(repr(v) for v in npis[malformed].head(3))
+        raise ValueError(f"{int(malformed.sum())} rows have an NPI that is not 10 digits (e.g. {examples})")
+    duplicated = npis.duplicated(keep=False)
+    if duplicated.any():
+        dupes = npis[duplicated].unique()
+        raise ValueError(
+            f"{len(dupes)} NPIs appear more than once (e.g. {', '.join(dupes[:3])}); "
+            "the by-provider file should have one row per NPI"
+        )
+
+
 def prepare(raw: pd.DataFrame) -> pd.DataFrame:
     """Rename CMS columns, coerce numbers and compute raw metrics.
 
@@ -126,6 +141,7 @@ def prepare(raw: pd.DataFrame) -> pd.DataFrame:
 
     df = raw[list(CMS_COLUMNS)].rename(columns=CMS_COLUMNS).copy()
     df["npi"] = df["npi"].astype(str).str.strip()
+    _check_npis(df["npi"])
     for col in NUMERIC_COLUMNS:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 

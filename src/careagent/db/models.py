@@ -75,6 +75,9 @@ class Provider(Base):
     validation_notes: Mapped[Optional[str]] = mapped_column(Text)
     performance_narrative: Mapped[Optional[str]] = mapped_column(Text)
     narrative_source: Mapped[Optional[str]] = mapped_column(String(20))
+    # sha256 of model + prompt version + facts; an LLM narrative is reused
+    # only while all three are unchanged
+    narrative_fingerprint: Mapped[Optional[str]] = mapped_column(String(64))
     scorecard_version: Mapped[Optional[str]] = mapped_column(String(20))
     last_scored_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 

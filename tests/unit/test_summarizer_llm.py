@@ -37,6 +37,7 @@ def state():
 def with_key():
     with patch.object(summarizer.settings, "openai_api_key", "sk-test"), \
          patch.object(summarizer, "get_db", fake_db), \
+         patch.object(summarizer, "get_cached_narrative", return_value=None), \
          patch.object(summarizer, "update_provider_narrative") as save:
         yield save
 

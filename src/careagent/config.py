@@ -59,8 +59,15 @@ class Settings(BaseSettings):
     openai_reasoning_effort: str = Field(default="none")
     # Reasoning models count reasoning tokens against this limit.
     openai_max_completion_tokens: int = Field(default=4000)
-    openai_timeout_seconds: float = Field(default=60.0)
-    openai_max_retries: int = Field(default=1)
+    # Per-attempt timeout, SDK retries, and a hard total budget for all
+    # attempts. The total stays well inside Cloud Run's 120 s request limit so
+    # a slow model falls back to the template instead of timing out the request.
+    openai_timeout_seconds: float = Field(default=20.0)
+    openai_max_retries: int = Field(default=0)
+    openai_total_budget_seconds: float = Field(default=45.0)
+
+    # Requests per client IP per minute on POST /analyze (0 disables)
+    rate_limit_per_minute: int = Field(default=20)
 
     # LangSmith
     langchain_tracing_v2: bool = Field(default=False)
