@@ -49,6 +49,13 @@ NARRATIVE_TOOL = {"type": "function", "function": NARRATIVE_FUNCTION}
 _NUMBER = re.compile(r"\d[\d,]*\.?\d*")
 
 
+def ordinal(value: float) -> str:
+    """31 -> '31st', 12 -> '12th', 22.6 -> '23rd'."""
+    n = int(round(value))
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
 def _facts(state: AgentState) -> list[str]:
     """The fact lines given to the model (also used by the template)."""
     lines = [
@@ -67,7 +74,7 @@ def _facts(state: AgentState) -> list[str]:
             continue
         lines.append(
             f"{item['label']}: {item['ratio_to_peer_median']:.1f}x the specialty median "
-            f"({item['percentile']:.0f}th percentile)"
+            f"({ordinal(item['percentile'])} percentile)"
         )
     for reason in state.get("outlier_reasons") or []:
         lines.append(f"Outlier reason: {reason}")
