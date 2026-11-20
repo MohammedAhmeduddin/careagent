@@ -58,6 +58,21 @@ class TestNumbersGrounded:
         assert summarizer.numbers_grounded("Among 1,200 peers", ["peers: 1200"])
 
 
+@pytest.mark.parametrize("value,expected", [
+    (1, "1st"), (2, "2nd"), (3, "3rd"), (4, "4th"), (11, "11th"), (12, "12th"),
+    (13, "13th"), (21, "21st"), (22.6, "23rd"), (31.4, "31st"), (100, "100th"), (111, "111th"),
+])
+def test_ordinal(value, expected):
+    assert summarizer.ordinal(value) == expected
+
+
+def test_facts_use_correct_ordinals(state):
+    facts = " ".join(summarizer._facts(state))
+    assert "99th percentile" in facts and "80th percentile" in facts
+    assert "31th" not in summarizer._facts({**state, "peer_comparison": {
+        "cost": {"label": "cost", "ratio_to_peer_median": 0.7, "percentile": 31.4}}})[-1]
+
+
 class TestLLMPath:
     def test_grounded_narrative_is_used(self, state, with_key):
         good = "Billing is 3.1x the Cardiology median among 891 peers."
